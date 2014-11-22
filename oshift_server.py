@@ -30,28 +30,28 @@ class throttler(object):
         self.timestamp = time.time()
 
 class motorPID(object):
-    def __init__(self,port,KP=3.0,KI=1.5,KD=0.3):
-        self.port = port
-        self.KP = KP
-        self.KI = KI
-        self.KD = KD
+    def __init__(self,KP=3.0,KI=1.5,KD=0.3):
 
-    def setZero(self,zero_pos):
+        self.Kp = KP
+        self.Ki = KI
+        self.Kd = KD
+        self.integral = 0
+        self.prev_error = 0
+        self.timestamp = time.time()
+        self.zero = 0
+
+    def set_zero(self,zero_pos):
         self.zero = zero_pos
 
     def get_power(self,error):
-        return error *2
-
-# previous_error = 0
-# integral = 0
-# start:
-#   error = setpoint - measured_value
-#   integral = integral + error*dt
-#   derivative = (error - previous_error)/dt
-#   output = Kp*error + Ki*integral + Kd*derivative
-#   previous_error = error
-#   wait(dt)
-#   goto start
+        dt = time.time()-self.timestamp
+        error -= self.zero
+        self.integral += error*dt #shouldn't the integral be emptied sometime?
+        derivative = (error - self.prev_error)/dt
+        output = self.Kp*error + self.Ki*self.integral + self.Kd*derivative
+        self.prev_error = error
+        self.timestamp = time.time()
+        return int(-output)
 
 
 ############# Initialize ##########################
@@ -97,16 +97,22 @@ class motorControl (threading.Thread):		#This thread is used for keeping the mot
             no_values = BrickPiUpdateValues()
 
         # Now we can start!
-        position0_A = int(BrickPi.Encoder[PORT_A])
+        control_a = motorPID()
+        control_a.set_zero(int(BrickPi.Encoder[PORT_A]))
+
+        control_b = motorPID()
+        control_b.set_zero(int(BrickPi.Encoder[PORT_B]))
+        #position0_A = int(BrickPi.Encoder[PORT_A])
         #position0_B = int(BrickPi.Encoder[PORT_B])
 
 
         while running:
 
-            err_A = (BrickPi.Encoder[PORT_A]-position0_A)-gp_state['look_h']
-            #err_B = (BrickPi.Encoder[PORT_A]-position0_A)-gp_state['look_v']
+            err_A = (BrickPi.Encoder[PORT_A]-gp_state['look_h'])
+            err_B = (BrickPi.Encoder[PORT_B]-gp_state['look_v'])
 
-            BrickPi.MotorSpeed[PORT_A] = -err_A*2		# Set Speed=0 which means stop
+            BrickPi.MotorSpeed[PORT_A] = control_a.get_power(err_A)		# Set Speed=0 which means stop
+            BrickPi.MotorSpeed[PORT_B] = control_b.get_power(err_B)
             BrickPiUpdateValues()       # Ask BrickPi to update values for sensors/motors
             wait.throttle()            # Don't overload the brickpi too much
 
@@ -136,7 +142,7 @@ while True: #Main loop
                         # a "Connection reset by peer" exception will be thrown
                         data = sock.recv(RECV_BUFFER)
                         gp_state = pickle.loads(data)
-                        wait.throttle()
+
                         # acknowledge
                         sock.send('OK ... ')
 

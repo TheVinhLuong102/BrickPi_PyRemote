@@ -22,13 +22,13 @@ sixaxis = {
     'stick_center': 0,
     'btn_lshoulder': 8,
     'btn_rshoulder': 9,
-    'btn_A': 0,
+    'btn_A': 4,
     'invert_y': -1,
     'btn_start': 12
 }
 
 # Remote host configuration for opening sockets
-HOST = 'brickpi'  # The remote host
+HOST = 'brickpiplus'  # The remote host
 PORT = 50007  # The same port as used by the server
 
 # Oculus VR configuration
@@ -121,7 +121,7 @@ while 1:
     gp_data = get_gamepad_state(sixaxis)
     msg = pickle.dumps(gp_data)
     s.send(msg)
-    print gp_data['btn_A'], gp_data['look_h']
+    print gp_data['btn_A'], gp_data['look_h'], gp_data['look_v']
     if gp_data['btn_start']:
         print 'stopping'
 
