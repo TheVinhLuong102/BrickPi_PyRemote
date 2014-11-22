@@ -1,6 +1,6 @@
-# Pycharm stuff #
+# Project experiment stuff #
 ##############
-Tests/
+experiments/
 oculusvr/
 .idea/
 
@@ -25,6 +25,8 @@ oculusvr/
 *.rar
 *.tar
 *.zip
+*.pdf
+*.mp4
  
 # Logs and databases #
 ######################

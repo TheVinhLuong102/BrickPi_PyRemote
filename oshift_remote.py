@@ -20,10 +20,11 @@ sixaxis = {
     'gp_object': sdl2.SDL_JoystickOpen(0),  # sixaxis
     'stick_range': 65536,  # max stick position - min stick position
     'stick_center': 0,
-    'left_shoulder_btn': 8,
-    'right_shoulder_btn': 9,
+    'btn_lshoulder': 8,
+    'btn_rshoulder': 9,
+    'btn_A': 0,
     'invert_y': -1,
-    'abort_btn': 12
+    'btn_start': 12
 }
 
 # Remote host configuration for opening sockets
@@ -32,32 +33,29 @@ PORT = 50007  # The same port as used by the server
 
 # Oculus VR configuration
 
-rotationC = 100  #constants to convert input to degrees or sometheing
+rotationC = 100  # constants to convert input to degrees or sometheing
 rollC = 1115 - 1000
 translationC = 2000
 
-X_AXIS = 0.0  #rotation of headset
+X_AXIS = 0.0  # rotation of headset
 Y_AXIS = 0.0
 Z_AXIS = 0.0
 
-
-###################Intialisation###################
-
-# open socket to the Raspberry Pi
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect((HOST, PORT))
-
-# start oculus rift
-ovr_Initialize()
-hmd = ovrHmd_Create(0)
-ovrHmd_ConfigureTracking(hmd,
-                         ovrTrackingCap_Orientation |
-                         ovrTrackingCap_MagYawCorrection,
-                         0
-                        )
+FRAMERATE = 50  # Number of packets to send per second
 
 
-###############Helper functions####################
+
+# ############## Helper functions ####################
+class throttler(object):
+    def __init__(self, framerate):
+        self.fps = framerate
+        self.timestamp = time.time()
+    def throttle(self):
+        wait_time = 1.0 / self.fps - (time.time() - self.timestamp)
+        if wait_time > 0:
+            time.sleep(wait_time)
+        self.timestamp = time.time()
+
 
 def get_oculus_data():
     """possitioning data gathered here"""
@@ -80,19 +78,42 @@ def get_oculus_data():
     Y_AXIS = -pose.ThePose.Orientation.y * rotationC
     Z_AXIS = -pose.ThePose.Orientation.z * rollC
 
-    print str(X_AXIS) + ", " + str(Y_AXIS) + ", " + str(Z_AXIS)
+    #debugging:
+    #print str(X_AXIS) + ", " + str(Y_AXIS) + ", " + str(Z_AXIS)
 
 
 def get_gamepad_state(gp):
     #update joystick info
     sdl2.SDL_PumpEvents()
-    #joy_x is an int in range -100,100
+    #get joystick values in range -100,100
     gp_state = {'look_h': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 2) - gp['stick_center']) * 200 / gp['stick_range'],
-                'look_v': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 3) - gp['stick_center']) * 200 / gp['stick_range']
-
+                'look_v': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 3) - gp['stick_center']) * 200 / gp['stick_range'],
+                'move_x': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 0) - gp['stick_center']) * 200 / gp['stick_range'],
+                'move_y': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 1) - gp['stick_center']) * 200 / gp['stick_range'],
+                'btn_start': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_start']),
+                'btn_A': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_A'])
     }
 
-    return gp_state['look_h']
+    return gp_state
+
+################### Intialisation ###################
+
+# open socket to the Raspberry Pi
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.connect((HOST, PORT))
+
+# start oculus rift
+ovr_Initialize()
+hmd = ovrHmd_Create(0)
+ovrHmd_ConfigureTracking(hmd,
+                         ovrTrackingCap_Orientation |
+                         ovrTrackingCap_MagYawCorrection,
+                         0
+)
+
+# new throttler
+wait = throttler(FRAMERATE)
+
 
 ###################Main Loop#######################
 while 1:
@@ -100,8 +121,8 @@ while 1:
     gp_data = get_gamepad_state(sixaxis)
     msg = pickle.dumps(gp_data)
     s.send(msg)
-
-    if sdl2.SDL_JoystickGetButton(sixaxis['gamepad'], sixaxis['abort_btn']):
+    print gp_data['btn_A'], gp_data['look_h']
+    if gp_data['btn_start']:
         print 'stopping'
 
         s.close()
@@ -109,3 +130,5 @@ while 1:
     else:
         data = s.recv(1024)
         print 'Received:', repr(data)
+
+    wait.throttle()
