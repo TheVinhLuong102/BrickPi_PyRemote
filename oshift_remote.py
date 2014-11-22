@@ -13,18 +13,23 @@ from oculusvr import *
 # ##########Constants & configuration################
 # initialise joysticking
 sticks = sdl2.SDL_Init(sdl2.SDL_INIT_JOYSTICK)
+LOOK_H_FACTOR = -3      # Amplify control by this number. Do it server-side to avoid loss of resolution
 
 # Gamepad config
 sixaxis = {
     'gamepad_num': 0,
-    'gp_object': sdl2.SDL_JoystickOpen(0),  # sixaxis
+    'gp_object': sdl2.SDL_JoystickOpen(0),  # sixaxis is the first gamepad on my system
     'stick_range': 65536,  # max stick position - min stick position
     'stick_center': 0,
     'btn_lshoulder': 8,
     'btn_rshoulder': 9,
     'btn_A': 14,
-    'invert_y': -1,
-    'btn_Y': 12
+    'btn_B': 13,
+    'btn_X': 15,
+    'btn_Y': 12,
+    'invert_y': -1, #-1 if it needs to be inverted, 1 otherwise
+    'btn_start': 3,
+    'btn_select': 0
 }
 
 # Remote host configuration for opening sockets
@@ -41,7 +46,9 @@ X_AXIS = 0.0  # rotation of headset
 Y_AXIS = 0.0
 Z_AXIS = 0.0
 
-FRAMERATE = 50  # Number of packets to send per second
+
+# General speed of the program
+FRAMERATE = 50  # Number of loops (packets to send) per second
 
 
 
@@ -86,15 +93,16 @@ def get_gamepad_state(gp):
     #update joystick info
     sdl2.SDL_PumpEvents()
     #get joystick values in range -100,100
-    gp_state = {'look_h': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 2) - gp['stick_center']) * 200 / gp['stick_range'],
-                'look_v': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 3) - gp['stick_center']) * 200 / gp['stick_range'],
+    #it's integer math, so multiplications should go first
+    return {'look_h': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 2) - gp['stick_center']) * 200 * LOOK_H_FACTOR / gp['stick_range'],
+                'look_v': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 3) - gp['stick_center']) * 200 / gp['stick_range'] * gp['invert_y'],
                 'move_x': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 0) - gp['stick_center']) * 200 / gp['stick_range'],
-                'move_y': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 1) - gp['stick_center']) * 200 / gp['stick_range'],
+                'move_y': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 1) - gp['stick_center']) * 200 / gp['stick_range'] * gp['invert_y'],
                 'btn_Y': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_Y']),
-                'btn_A': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_A'])
-    }
-
-    return gp_state
+                'btn_A': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_A']),
+                'btn_lshoulder': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_lshoulder']),
+                'btn_rshoulder': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_rshoulder'])
+            }
 
 ################### Intialisation ###################
 

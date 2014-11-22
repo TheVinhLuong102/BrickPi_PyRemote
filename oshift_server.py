@@ -1,5 +1,8 @@
 __author__ = 'anton'
 
+from jaraco.nxt import *
+from jaraco.nxt.messages import *
+import math
 
 import socket, time, select
 try:
@@ -18,7 +21,11 @@ RECV_BUFFER = 4096      # Advisable to keep it as an exponent of 2
 PORT = 50007
 MOTOR_CMD_RATE = 30     # Max number of motor commands per second
 
+
 ########### Helper functions ######################
+def clamp(n, minn, maxn):
+    return max(min(maxn, n), minn)
+
 class throttler(object):
     def __init__(self, framerate):
         self.fps = framerate
@@ -55,6 +62,12 @@ class motorPID(object):
 
 
 ############# Initialize ##########################
+
+# Start a BT connection over to the NXT
+# open the connection. Get this string from preferences>bluetooth>NXT>edit serial ports
+conn = Connection('/dev/rfcomm0')  # antons NXT
+
+# Initialize server socket
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 # this has no effect, why ?
 server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -74,19 +87,52 @@ BrickPiSetupSensors()   #Send the properties of sensors to BrickPi
 
 #Initialize globals
 running = True
-gp_state = {'look_h': 0, 'look_v': 0, 'move_x': 0, 'move_y': 0, 'btn_start': 0, 'btn_A': 0}
+gp_state = {'look_h': 0, 'look_v': 0, 'move_x': 0, 'move_y': 0, 'btn_start': 0, 'btn_A': 0, 'btn_lshoulder': 0, 'btn_rshoulder':0}
 wait = throttler(MOTOR_CMD_RATE)
 
 
 ############ Main threads ######################
+class btRemoteControl(threading.Thread):
+    def run(self):
+        while running:
+            # use shoulder buttons on the game pad to make the omnibot rotate around it's axis.
+            turnpower = 0
+            if gp_state['btn_rshoulder']:turnpower = 75
+            if gp_state['btn_lshoulder']:turnpower = -75
+
+            # convert joystick x and y to a direction and power (deviation from the centre)
+            joy_direction = math.atan2(gp_state['move_y'], gp_state['move_x'])  # in radians
+            joy_power = (gp_state['move_x'] ** 2 + gp_state['move_y'] ** 2) ** 0.5  # pythagoras
+
+            # building a list of three motor commands to send over
+            cmds = []
+            for i in range(3):
+                # for each motor the angle has a different offset (0, 120 and 240 degrees)
+                angle = i * 2 * 3.1415 / 3 + joy_direction
+
+                # motor power calculation. A simple sin.
+                motorpower = math.sin(angle) * joy_power + turnpower
+
+                motorpower = round(clamp(motorpower, -100, 100))
+
+                cmds.append(SetOutputState(
+                                          i,
+                                          motor_on=True,
+                                          set_power=motorpower,
+                                          run_state=RunState.running,
+                                          use_regulation=True,
+                                          regulation_mode=RegulationMode.motor_speed
+                                          )
+                    )
+
+            map(conn.send, cmds)
+
+            # wait a bit before sending more commands. If we don't the BT buffer overflows.
+            time.sleep(0.05)
+
+
 
 class motorControl (threading.Thread):		#This thread is used for keeping the motor running while the main thread waits for user input
-    def __init__(self, threadID, name, counter):
-        threading.Thread.__init__(self)
-        self.threadID = threadID
-        self.name = name
-        self.counter = counter
-
     def run(self):
 
         # Ask BrickPi to update values for sensors/motors
@@ -97,11 +143,11 @@ class motorControl (threading.Thread):		#This thread is used for keeping the mot
             no_values = BrickPiUpdateValues()
 
         # Now we can start!
-        control_a = motorPID()
-        control_a.set_zero(int(BrickPi.Encoder[PORT_A]))
+        pid_control_a = motorPID()
+        pid_control_a.set_zero(int(BrickPi.Encoder[PORT_A]))
 
-        control_b = motorPID()
-        control_b.set_zero(int(BrickPi.Encoder[PORT_B]))
+        pid_control_b = motorPID()
+        pid_control_b.set_zero(int(BrickPi.Encoder[PORT_B]))
         #position0_A = int(BrickPi.Encoder[PORT_A])
         #position0_B = int(BrickPi.Encoder[PORT_B])
 
@@ -111,14 +157,19 @@ class motorControl (threading.Thread):		#This thread is used for keeping the mot
             err_A = (BrickPi.Encoder[PORT_A]-gp_state['look_h'])
             err_B = (BrickPi.Encoder[PORT_B]-gp_state['look_v'])
 
-            BrickPi.MotorSpeed[PORT_A] = control_a.get_power(err_A)		# Set Speed=0 which means stop
-            BrickPi.MotorSpeed[PORT_B] = control_b.get_power(err_B)
+            BrickPi.MotorSpeed[PORT_A] = pid_control_a.get_power(err_A)		# Set Speed=0 which means stop
+            BrickPi.MotorSpeed[PORT_B] = pid_control_b.get_power(err_B)
             BrickPiUpdateValues()       # Ask BrickPi to update values for sensors/motors
             wait.throttle()            # Don't overload the brickpi too much
 
-thread1 = motorControl(1, "Thread-1", 1)		#Setup and start the thread
+thread1 = motorControl()		#Setup and start the thread
 thread1.setDaemon(True)
 thread1.start()
+
+thread2 = btRemoteControl()		#Setup and start the thread
+thread2.setDaemon(True)
+thread2.start()
+
 
 while True: #Main loop
     try:
@@ -154,6 +205,8 @@ while True: #Main loop
                         CONNECTION_LIST.remove(sock)
                         continue
     except KeyboardInterrupt:			#Triggered by pressing Ctrl+C
-        running = False				#Stop theread1
+        running = False				    #Stop threads
+        conn.close()                    #close BT rfcomm
+        server_socket.close()
         print "Bye"
         break					#Exit
