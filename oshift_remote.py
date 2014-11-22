@@ -22,9 +22,9 @@ sixaxis = {
     'stick_center': 0,
     'btn_lshoulder': 8,
     'btn_rshoulder': 9,
-    'btn_A': 4,
+    'btn_A': 14,
     'invert_y': -1,
-    'btn_start': 12
+    'btn_Y': 12
 }
 
 # Remote host configuration for opening sockets
@@ -90,7 +90,7 @@ def get_gamepad_state(gp):
                 'look_v': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 3) - gp['stick_center']) * 200 / gp['stick_range'],
                 'move_x': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 0) - gp['stick_center']) * 200 / gp['stick_range'],
                 'move_y': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 1) - gp['stick_center']) * 200 / gp['stick_range'],
-                'btn_start': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_start']),
+                'btn_Y': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_Y']),
                 'btn_A': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_A'])
     }
 
@@ -122,7 +122,7 @@ while 1:
     msg = pickle.dumps(gp_data)
     s.send(msg)
     print gp_data['btn_A'], gp_data['look_h'], gp_data['look_v']
-    if gp_data['btn_start']:
+    if gp_data['btn_Y']:
         print 'stopping'
 
         s.close()
