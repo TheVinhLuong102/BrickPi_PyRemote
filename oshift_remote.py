@@ -3,6 +3,7 @@ __author__ = 'anton'
 import socket
 import sdl2
 import time
+import subprocess
 
 try:
     import cPickle as pickle
@@ -109,6 +110,20 @@ def get_gamepad_state(gp):
 # open socket to the Raspberry Pi
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect((HOST, PORT))
+
+# send our IP address across
+handshake = {'ip_addr': socket.gethostbyname(socket.gethostname())} # the slower way is: socket.gethostbyname(socket.getfqdn())
+msg = pickle.dumps(handshake)
+s.send(msg)
+
+# wait for answer
+data = s.recv(1024)
+print 'Received:', repr(data)
+
+# start receiving video
+cmd = "gst-launch-1.0 udpsrc port=5000 ! application/x-rtp, payload=96 ! rtpjitterbuffer ! rtph264depay ! avdec_h264 ! fpsdisplaysink sync=false text-overlay=false"
+args = cmd.split(" ") #shlex.split() is safer, but this works.
+subprocess.Popen(args)
 
 # start oculus rift
 ovr_Initialize()
