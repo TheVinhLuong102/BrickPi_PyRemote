@@ -29,12 +29,14 @@ Make sure you start with a fresh [Raspbian image](http://www.raspberrypi.org/dow
 Don't use the image from dexter industries. BT doesn't 
   work on it and it has meager support for WiFi dongles. On a Mac you can burn the downloaded image with the 'restore 
   backup function in [ApplePi-Baker](http://www.tweaking4all.com/hardware/raspberry-pi/macosx-apple-pi-baker/).
+  This should also be possible via the command line, but I didn't bother.
 
 Make sure you set up your image after the first boot.
 ```bash
 sudo raspi-config
 ```
 And set up
+
 1. The PiCamera
 2. A custom hostname e.g. 'BrickPi'
 3. Whatever else you feel like
@@ -99,3 +101,19 @@ sudo pip install picamera
 ```
 
 
+## On the Mac ##
+It's easiest if you start by installing [homebrew](http://brew.sh). I'm a big fan. 
+
+Next, get sdl2 and gstreamer:
+```
+brew install sdl2 gstreamer
+```
+
+Next get the needed python libraries. If you don't have (or want hg) you can also download the whole repo, of course.
+```
+hg clone https://bitbucket.org/marcusva/py-sdl2
+cd py-sdl2
+sudo python setup.py install
+```
+
+We might also need this [gst-python](http://gstreamer.freedesktop.org/src/gst-python/)

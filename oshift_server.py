@@ -4,6 +4,7 @@ __author__ = 'anton'
 from jaraco.nxt import *
 from jaraco.nxt.messages import *
 import math
+import shlex, picamera
 
 #to open sockets en receive data from client
 import socket, time, select
@@ -28,12 +29,14 @@ VIDEO_PORT = 5000
 MOTOR_CMD_RATE = 30  # Max number of motor commands per second
 BT_CMD_RATE = 30
 
-STREAM_CMD = "raspivid -t 999999 -b 2000000 -o - | gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
+#STREAM_CMD = "raspivid -t 999999 -b 2000000 -o - | gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
+STREAM_CMD = "gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
+
+#TODO add constants for fps, bitrate and video size.
 
 ########### Helper functions ######################
 def clamp(n, minn, maxn):
     return max(min(maxn, n), minn)
-
 
 class throttler(object):
     def __init__(self, framerate):
@@ -72,9 +75,10 @@ class motorPID(object):
         return int(-output)
 
 
-def start_video(ip_addr):
-    args = STREAM_CMD.format(ip_addr,VIDEO_PORT).split(' ') #insert port and IP address. Then split into args.
-    return subprocess.Popen(args)
+# def start_video(ip_addr): #doesn't work because of the pipe in the command.
+#     args = shlex.split(STREAM_CMD.format(ip_addr,VIDEO_PORT)) #insert port and IP address. Then split into args.
+#     print STREAM_CMD.format(ip_addr,VIDEO_PORT)
+#     return subprocess.Popen(args)
 
 def start_rfcomm():
     cmd = "sudo rfcomm connect rfcomm0"
@@ -86,9 +90,9 @@ def start_rfcomm():
 
 # Start a BT connection over to the NXT
 print "Initializing Bluetooth"
-rfcomm_process = start_rfcomm()
+# rfcomm_process = start_rfcomm()
 # open the connection. Get this string from /dev/bluetooth/rfcomm.conf
-conn = Connection('/dev/rfcomm0')  # antons NXT
+# conn = Connection('/dev/rfcomm0')  # antons NXT
 
 # Setup BrickPi and motors
 print "Revving up engines"
@@ -121,6 +125,32 @@ btloop = throttler(BT_CMD_RATE)
 
 
 ############ Main threads ######################
+class sendVideo(threading.Thread):
+    def __init__(self,ip_addr):
+        threading.Thread.__init__(self)
+        self.ip_addr = ip_addr
+
+
+    def run(self):
+        cmd = shlex.split(STREAM_CMD.format(self.ip_addr,VIDEO_PORT))
+        streamer = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+
+        try:
+            with picamera.PiCamera() as camera:
+                camera.resolution = (640, 480)
+                camera.framerate = 24
+                # Start a preview and let the camera warm up for 2 seconds
+                camera.start_preview()
+                time.sleep(2)
+                # Start recording, sending the output to the connection for 60
+                # seconds, then stop
+                camera.start_recording(streamer.stdin, format='h264')
+                camera.wait_recording(60)
+                camera.stop_recording()
+        finally:
+            streamer.terminate()
+
+
 class btRemoteControl(threading.Thread):
     def run(self):
         while running:
@@ -196,9 +226,9 @@ thread1 = motorControl()  #Setup and start the thread
 thread1.setDaemon(True)
 thread1.start()
 
-thread2 = btRemoteControl()  #Setup and start the thread
-thread2.setDaemon(True)
-thread2.start()
+#thread2 = btRemoteControl()  #Setup and start the thread
+#thread2.setDaemon(True)
+#thread2.start()
 
 while True:  #Main loop
     try:
@@ -222,14 +252,18 @@ while True:  #Main loop
                     # a "Connection reset by peer" exception will be thrown
                     data = sock.recv(RECV_BUFFER)
                     rcvd_dict = pickle.loads(data)
+                    sock.send('OK ... ')
 
                     if 'ip_addr' in rcvd_dict:
-                        video_process = start_video(rcvd_dict['ip_addr'])
+                        thread3 = sendVideo(rcvd_dict['ip_addr'])  #Setup and start the thread
+                        thread3.setDaemon(True)
+                        thread3.start()
+                        print "Started video"
 
                     else:
                         gp_state = rcvd_dict
                     # acknowledge
-                    sock.send('OK ... ')
+
 
                 # client disconnected, so remove from socket list
                 except:
@@ -240,9 +274,9 @@ while True:  #Main loop
                     continue
     except KeyboardInterrupt:  #Triggered by pressing Ctrl+C. Time to clean up.
         running = False  #Stop threads
-        conn.close()  #close BT rfcomm
+        #conn.close()  #close BT rfcomm
         video_process.terminate() #stop streaming
-        rfcomm_process.terminate() #stop BT connection to NXT brick
+        #rfcomm_process.terminate() #stop BT connection to NXT brick
         server_socket.close()
         print "Bye"
         break  #Exit

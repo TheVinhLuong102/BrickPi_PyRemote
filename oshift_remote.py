@@ -14,7 +14,6 @@ from oculusvr import *
 # ##########Constants & configuration################
 # initialise joysticking
 sticks = sdl2.SDL_Init(sdl2.SDL_INIT_JOYSTICK)
-LOOK_H_FACTOR = -3      # Amplify control by this number. Do it server-side to avoid loss of resolution
 
 # Gamepad config
 sixaxis = {
@@ -54,7 +53,20 @@ FRAMERATE = 50  # Number of loops (packets to send) per second
 
 
 # ############## Helper functions ####################
+def normalized_stick_value(gp, axis, stick_max=100, deadzone=5):
+    stick_value = (sdl2.SDL_JoystickGetAxis(gp['gp_object'], axis) - gp['stick_center']) #center value arount 0
+    stick_value *= 2 * stick_max / gp['stick_range'] #normalize
+    if -deadzone < stick_value < deadzone:
+        return 0
+    else:
+        return stick_value
+
 class throttler(object):
+    """
+    This class makes sure a loop doesn't run faster than
+    it's designated loops per second by calling the throttle method
+    at the end of each loop.
+    """
     def __init__(self, framerate):
         self.fps = framerate
         self.timestamp = time.time()
@@ -95,10 +107,10 @@ def get_gamepad_state(gp):
     sdl2.SDL_PumpEvents()
     #get joystick values in range -100,100
     #it's integer math, so multiplications should go first
-    return {'look_h': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 2) - gp['stick_center']) * 200 * LOOK_H_FACTOR / gp['stick_range'],
-                'look_v': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 3) - gp['stick_center']) * 200 / gp['stick_range'] * gp['invert_y'],
-                'move_x': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 0) - gp['stick_center']) * 200 / gp['stick_range'],
-                'move_y': (sdl2.SDL_JoystickGetAxis(gp['gp_object'], 1) - gp['stick_center']) * 200 / gp['stick_range'] * gp['invert_y'],
+    return {'look_h': normalized_stick_value(gp,2,stick_max=300),
+                'look_v': normalized_stick_value(gp,3) * gp['invert_y'],
+                'move_x': normalized_stick_value(gp,0),
+                'move_y': normalized_stick_value(gp,1) * gp['invert_y'],
                 'btn_Y': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_Y']),
                 'btn_A': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_A']),
                 'btn_lshoulder': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_lshoulder']),
@@ -116,9 +128,11 @@ handshake = {'ip_addr': socket.gethostbyname(socket.gethostname())} # the slower
 msg = pickle.dumps(handshake)
 s.send(msg)
 
+time.sleep(3)
+
 # wait for answer
 data = s.recv(1024)
-print 'Received:', repr(data)
+print 'Handshake rcv:', repr(data)
 
 # start receiving video
 cmd = "gst-launch-1.0 udpsrc port=5000 ! application/x-rtp, payload=96 ! rtpjitterbuffer ! rtph264depay ! avdec_h264 ! fpsdisplaysink sync=false text-overlay=false"
@@ -151,7 +165,7 @@ while 1:
         s.close()
         break
     else:
-        data = s.recv(1024)
+        data = s.recv(1024) #read back to make sure we can send again. Also nice to get sensor readings.
         print 'Received:', repr(data)
 
     wait.throttle()
