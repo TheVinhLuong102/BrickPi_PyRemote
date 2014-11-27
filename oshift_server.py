@@ -29,6 +29,11 @@ VIDEO_PORT = 5000
 MOTOR_CMD_RATE = 30  # Max number of motor commands per second
 BT_CMD_RATE = 30
 
+FRAME_RATE = 24
+VIDEO_W = 1280
+VIDEO_H = 720
+BITRATE = 2000000
+
 #STREAM_CMD = "raspivid -t 999999 -b 2000000 -o - | gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
 STREAM_CMD = "gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
 
@@ -92,7 +97,7 @@ def start_rfcomm():
 print "Initializing Bluetooth"
 # rfcomm_process = start_rfcomm()
 # open the connection. Get this string from /dev/bluetooth/rfcomm.conf
-# conn = Connection('/dev/rfcomm0')  # antons NXT
+conn = Connection('/dev/rfcomm0')  # antons NXT
 
 # Setup BrickPi and motors
 print "Revving up engines"
@@ -116,6 +121,7 @@ print "Chat server started on port " + str(PORT)
 
 
 #Initialize globals
+video_playing = False
 running = True
 gp_state = {'look_h': 0, 'look_v': 0, 'move_x': 0, 'move_y': 0, 'btn_start': 0, 'btn_A': 0, 'btn_lshoulder': 0,
             'btn_rshoulder': 0}
@@ -137,15 +143,17 @@ class sendVideo(threading.Thread):
 
         try:
             with picamera.PiCamera() as camera:
-                camera.resolution = (640, 480)
-                camera.framerate = 24
+                camera.resolution = (VIDEO_W, VIDEO_H)
+                camera.framerate = FRAME_RATE
+
                 # Start a preview and let the camera warm up for 2 seconds
                 camera.start_preview()
                 time.sleep(2)
                 # Start recording, sending the output to the connection for 60
                 # seconds, then stop
-                camera.start_recording(streamer.stdin, format='h264')
-                camera.wait_recording(60)
+                camera.start_recording(streamer.stdin, format='h264') #todo add bitrate in string as kwarg
+                while video_playing:
+                    camera.wait_recording(1)
                 camera.stop_recording()
         finally:
             streamer.terminate()
@@ -226,9 +234,9 @@ thread1 = motorControl()  #Setup and start the thread
 thread1.setDaemon(True)
 thread1.start()
 
-#thread2 = btRemoteControl()  #Setup and start the thread
-#thread2.setDaemon(True)
-#thread2.start()
+thread2 = btRemoteControl()  #Setup and start the thread
+thread2.setDaemon(True)
+thread2.start()
 
 while True:  #Main loop
     try:
@@ -255,6 +263,7 @@ while True:  #Main loop
                     sock.send('OK ... ')
 
                     if 'ip_addr' in rcvd_dict:
+                        video_playing = True
                         thread3 = sendVideo(rcvd_dict['ip_addr'])  #Setup and start the thread
                         thread3.setDaemon(True)
                         thread3.start()
@@ -269,14 +278,18 @@ while True:  #Main loop
                 except:
                     #broadcast_data(sock, "Client (%s, %s) is offline" % addr)
                     print "Client (%s, %s) is offline" % addr
+                    video_playing =False
                     sock.close()
+
+                    #video stream moet ook stoppen hier TODO
+
                     CONNECTION_LIST.remove(sock)
                     continue
     except KeyboardInterrupt:  #Triggered by pressing Ctrl+C. Time to clean up.
         running = False  #Stop threads
-        #conn.close()  #close BT rfcomm
+        conn.close()  #close BT rfcomm
         video_process.terminate() #stop streaming
-        #rfcomm_process.terminate() #stop BT connection to NXT brick
+        rfcomm_process.terminate() #stop BT connection to NXT brick
         server_socket.close()
         print "Bye"
         break  #Exit

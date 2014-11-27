@@ -55,7 +55,7 @@ FRAMERATE = 50  # Number of loops (packets to send) per second
 # ############## Helper functions ####################
 def normalized_stick_value(gp, axis, stick_max=100, deadzone=5):
     stick_value = (sdl2.SDL_JoystickGetAxis(gp['gp_object'], axis) - gp['stick_center']) #center value arount 0
-    stick_value *= 2 * stick_max / gp['stick_range'] #normalize
+    stick_value = stick_value * 2 * stick_max / gp['stick_range'] #normalize
     if -deadzone < stick_value < deadzone:
         return 0
     else:
