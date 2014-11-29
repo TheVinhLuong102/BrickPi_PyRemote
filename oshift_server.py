@@ -21,6 +21,8 @@ import subprocess
 
 ############## Constants & settings ################
 
+BLUETOOTH = False
+VIDEO = False
 CONNECTION_LIST = []  # list of socket clients
 RECV_BUFFER = 4096  # Advisable to keep it as an exponent of 2
 PORT = 50007        #data port
@@ -57,7 +59,7 @@ class throttler(object):
 
 
 class motorPID(object):
-    def __init__(self, KP=3.0, KI=1.5, KD=0.3):
+    def __init__(self, KP=1.8, KI=0.1, KD=0.15):
         self.Kp = KP
         self.Ki = KI
         self.Kd = KD
@@ -93,17 +95,19 @@ def start_rfcomm():
 
 ############# Initialize ##########################
 
-# Start a BT connection over to the NXT
-print "Initializing Bluetooth"
-# rfcomm_process = start_rfcomm()
-# open the connection. Get this string from /dev/bluetooth/rfcomm.conf
-conn = Connection('/dev/rfcomm0')  # antons NXT
+if BLUETOOTH:
+    # Start a BT connection over to the NXT
+    print "Initializing Bluetooth"
+    # rfcomm_process = start_rfcomm()
+    # open the connection. Get this string from /dev/bluetooth/rfcomm.conf
+    conn = Connection('/dev/rfcomm0')  # antons NXT
 
 # Setup BrickPi and motors
 print "Revving up engines"
 BrickPiSetup()  # setup the serial port for communication
 BrickPi.MotorEnable[PORT_A] = 1  #Enable the Motor A
 BrickPi.MotorEnable[PORT_B] = 1  #Enable the Motor B
+BrickPi.MotorEnable[PORT_C] = 1  #Enable the Motor C
 
 #BrickPi.SensorType[PORT_4] = TYPE_SENSOR_ULTRASONIC_CONT	#Setting the type of sensor at PORT4
 BrickPiSetupSensors()  #Send the properties of sensors to BrickPi
@@ -127,6 +131,7 @@ gp_state = {'look_h': 0, 'look_v': 0, 'move_x': 0, 'move_y': 0, 'btn_start': 0, 
             'btn_rshoulder': 0}
 motorloop = throttler(MOTOR_CMD_RATE)
 btloop = throttler(BT_CMD_RATE)
+gun_busy = False
 
 
 
@@ -199,8 +204,8 @@ class btRemoteControl(threading.Thread):
 
 
 
-class motorControl(
-    threading.Thread):  #This thread is used for keeping the motor running while the main thread waits for user input
+class motorControl(threading.Thread):  #This thread is used for keeping the motor running while the main thread waits for user input
+
     def run(self):
 
         # Ask BrickPi to update values for sensors/motors
@@ -209,6 +214,7 @@ class motorControl(
         no_values = 1
         while no_values:
             no_values = BrickPiUpdateValues()
+
 
         # Now we can start!
         pid_control_a = motorPID()
@@ -226,22 +232,44 @@ class motorControl(
 
             BrickPi.MotorSpeed[PORT_A] = pid_control_a.get_power(err_A)  # Set Speed=0 which means stop
             BrickPi.MotorSpeed[PORT_B] = pid_control_b.get_power(err_B)
+
             BrickPiUpdateValues()  # Ask BrickPi to update values for sensors/motors
             motorloop.throttle()  # Don't overload the brickpi too much, wait a bit.
+
+class shoot(threading.Thread):
+    def run(self):
+        global gun_busy
+        gun_busy = True
+        BrickPi.MotorSpeed[PORT_C] = 200 #naar achter
+        #BrickPiUpdateValues()
+        time.sleep(.5)
+        BrickPi.MotorSpeed[PORT_C] = -200 #naar voor
+        #BrickPiUpdateValues()
+        time.sleep(1)
+        BrickPi.MotorSpeed[PORT_C] = 0
+        gun_busy = False
 
 
 thread1 = motorControl()  #Setup and start the thread
 thread1.setDaemon(True)
 thread1.start()
 
-thread2 = btRemoteControl()  #Setup and start the thread
-thread2.setDaemon(True)
-thread2.start()
+if BLUETOOTH:
+    thread2 = btRemoteControl()  #Setup and start the thread
+    thread2.setDaemon(True)
+    thread2.start()
 
 while True:  #Main loop
     try:
+        # Check for shooting
+        if gp_state['btn_A'] and not gun_busy:
+            thread3 = shoot()  #Setup and start the thread
+            thread3.setDaemon(True)
+            thread3.start()
+
         # Get the list sockets which are ready to be read through select
         read_sockets, write_sockets, error_sockets = select.select(CONNECTION_LIST, [], [])
+
 
         for sock in read_sockets:
 
@@ -263,11 +291,12 @@ while True:  #Main loop
                     sock.send('OK ... ')
 
                     if 'ip_addr' in rcvd_dict:
-                        video_playing = True
-                        thread3 = sendVideo(rcvd_dict['ip_addr'])  #Setup and start the thread
-                        thread3.setDaemon(True)
-                        thread3.start()
-                        print "Started video"
+                        if VIDEO:
+                            video_playing = True
+                            thread3 = sendVideo(rcvd_dict['ip_addr'])  #Setup and start the thread
+                            thread3.setDaemon(True)
+                            thread3.start()
+                            print "Started video"
 
                     else:
                         gp_state = rcvd_dict
@@ -287,9 +316,12 @@ while True:  #Main loop
                     continue
     except KeyboardInterrupt:  #Triggered by pressing Ctrl+C. Time to clean up.
         running = False  #Stop threads
-        conn.close()  #close BT rfcomm
-        video_process.terminate() #stop streaming
-        rfcomm_process.terminate() #stop BT connection to NXT brick
+        if BLUETOOTH:
+            conn.close()  #close BT rfcomm
+            rfcomm_process.terminate() #stop BT connection to NXT brick
+        if VIDEO:
+            video_process.terminate() #stop streaming
+
         server_socket.close()
         print "Bye"
         break  #Exit

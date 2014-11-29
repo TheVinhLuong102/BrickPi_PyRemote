@@ -33,7 +33,7 @@ sixaxis = {
 }
 
 # Remote host configuration for opening sockets
-HOST = 'brickpiplus'  # The remote host
+HOST = '10.42.35.36'  # The remote host
 PORT = 50007  # The same port as used by the server
 
 # Oculus VR configuration
@@ -99,7 +99,7 @@ def get_oculus_data():
     Z_AXIS = -pose.ThePose.Orientation.z * rollC
 
     #debugging:
-    #print str(X_AXIS) + ", " + str(Y_AXIS) + ", " + str(Z_AXIS)
+    print str(X_AXIS) + ", " + str(Y_AXIS) + ", " + str(Z_AXIS)
 
 
 def get_gamepad_state(gp):
@@ -107,8 +107,8 @@ def get_gamepad_state(gp):
     sdl2.SDL_PumpEvents()
     #get joystick values in range -100,100
     #it's integer math, so multiplications should go first
-    return {'look_h': normalized_stick_value(gp,2,stick_max=300),
-                'look_v': normalized_stick_value(gp,3) * gp['invert_y'],
+    return {'look_h': int(Y_AXIS*10), #normalized_stick_value(gp,2,stick_max=300),
+                'look_v': int(X_AXIS*-1.9), #normalized_stick_value(gp,3) * gp['invert_y'],
                 'move_x': normalized_stick_value(gp,0),
                 'move_y': normalized_stick_value(gp,1) * gp['invert_y'],
                 'btn_Y': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_Y']),
@@ -124,7 +124,8 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect((HOST, PORT))
 
 # send our IP address across
-handshake = {'ip_addr': socket.gethostbyname(socket.gethostname())} # the slower way is: socket.gethostbyname(socket.getfqdn())
+#handshake = {'ip_addr': socket.gethostbyname(socket.gethostname())} # the slower way is: socket.gethostbyname(socket.getfqdn())
+handshake = {'ip_addr': '192.168.99.61'} # the slower way is: socket.gethostbyname(socket.getfqdn())
 msg = pickle.dumps(handshake)
 s.send(msg)
 
@@ -158,7 +159,7 @@ while 1:
     gp_data = get_gamepad_state(sixaxis)
     msg = pickle.dumps(gp_data)
     s.send(msg)
-    print gp_data['btn_A'], gp_data['look_h'], gp_data['look_v']
+    #print gp_data['btn_A'], gp_data['look_h'], gp_data['look_v']
     if gp_data['btn_Y']:
         print 'stopping'
 
