@@ -12,8 +12,12 @@ except:
 from oculusvr import *
 
 # ##########Constants & configuration################
+# Start a video process or not
+START_VIDEO = False
+
 # initialise joysticking
 sticks = sdl2.SDL_Init(sdl2.SDL_INIT_JOYSTICK)
+
 
 # Gamepad config
 sixaxis = {
@@ -32,11 +36,14 @@ sixaxis = {
     'btn_select': 0
 }
 
+
 # Remote host configuration for opening sockets
-HOST = '10.42.35.36'  # The remote host
+HOST = '10.42.35.36'  # The remote RPi with the server script running
 PORT = 50007  # The same port as used by the server
+MY_IP = '10.42.35.34'
 
 # Oculus VR configuration
+OCULUS_ENABLED = False
 
 rotationC = 100  # constants to convert input to degrees or sometheing
 rollC = 1115 - 1000
@@ -79,12 +86,16 @@ class throttler(object):
 
 def get_oculus_data():
     """possitioning data gathered here"""
-    ss = ovrHmd_GetTrackingState(hmd, ovr_GetTimeInSeconds())
-    pose = ss.HeadPose
 
     global X_AXIS
     global Y_AXIS
     global Z_AXIS
+    global OCULUS_ENABLED
+
+
+    ss = ovrHmd_GetTrackingState(hmd, ovr_GetTimeInSeconds())
+    pose = ss.HeadPose
+
 
     #This stuff is for projecting OpenGL images over the video. TODO
     # global xO
@@ -98,17 +109,19 @@ def get_oculus_data():
     Y_AXIS = -pose.ThePose.Orientation.y * rotationC
     Z_AXIS = -pose.ThePose.Orientation.z * rollC
 
-    #debugging:
-    print str(X_AXIS) + ", " + str(Y_AXIS) + ", " + str(Z_AXIS)
+    if (X_AXIS,Y_AXIS,Z_AXIS) == (0,0,0):
+        #print "No oculus data"
+        OCULUS_ENABLED = False
+    else:
+        #print str(X_AXIS) + ", " + str(Y_AXIS) + ", " + str(Z_AXIS)
+        OCULUS_ENABLED = True
 
 
 def get_gamepad_state(gp):
     #update joystick info
     sdl2.SDL_PumpEvents()
-    #get joystick values in range -100,100
-    #it's integer math, so multiplications should go first
-    return {'look_h': int(Y_AXIS*10), #normalized_stick_value(gp,2,stick_max=300),
-                'look_v': int(X_AXIS*-1.9), #normalized_stick_value(gp,3) * gp['invert_y'],
+    gp_state =  {'look_h': normalized_stick_value(gp,2,stick_max=300),
+                'look_v': normalized_stick_value(gp,3) * gp['invert_y'],
                 'move_x': normalized_stick_value(gp,0),
                 'move_y': normalized_stick_value(gp,1) * gp['invert_y'],
                 'btn_Y': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_Y']),
@@ -116,6 +129,12 @@ def get_gamepad_state(gp):
                 'btn_lshoulder': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_lshoulder']),
                 'btn_rshoulder': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_rshoulder'])
             }
+
+    if OCULUS_ENABLED:
+        gp_state['look_h'] = int(Y_AXIS*10) #normalized_stick_value(gp,2,stick_max=300),
+        gp_state['look_v'] = int(X_AXIS*-1.9) #normalized_stick_value(gp,3) * gp['invert_y'],
+
+    return gp_state
 
 ################### Intialisation ###################
 
@@ -125,7 +144,7 @@ s.connect((HOST, PORT))
 
 # send our IP address across
 #handshake = {'ip_addr': socket.gethostbyname(socket.gethostname())} # the slower way is: socket.gethostbyname(socket.getfqdn())
-handshake = {'ip_addr': '192.168.99.61'} # the slower way is: socket.gethostbyname(socket.getfqdn())
+handshake = {'ip_addr': MY_IP} # the slower way is: socket.gethostbyname(socket.getfqdn())
 msg = pickle.dumps(handshake)
 s.send(msg)
 
@@ -136,9 +155,12 @@ data = s.recv(1024)
 print 'Handshake rcv:', repr(data)
 
 # start receiving video
-cmd = "gst-launch-1.0 udpsrc port=5000 ! application/x-rtp, payload=96 ! rtpjitterbuffer ! rtph264depay ! avdec_h264 ! fpsdisplaysink sync=false text-overlay=false"
-args = cmd.split(" ") #shlex.split() is safer, but this works.
-subprocess.Popen(args)
+if START_VIDEO:
+    #cmd = "gst-launch-1.0 -e udpsrc port=5000 ! application/x-rtp, payload=96 ! rtpjitterbuffer ! rtph264depay ! avdec_h264 ! fpsdisplaysink sync=false text-overlay=false"
+    cmd = "gst-launch-1.0 udpsrc port=5000 ! application/x-rtp, payload=96, width=960, height=1080 ! rtpjitterbuffer ! rtph264depay ! decodebin ! glshader location=barrel1.fs ! glimagesink sync=false"
+    args = cmd.split(" ") #shlex.split() is safer, but this works.
+    vidprocess = subprocess.Popen(args, shell=True)
+
 
 # start oculus rift
 ovr_Initialize()
@@ -155,18 +177,22 @@ wait = throttler(FRAMERATE)
 
 ###################Main Loop#######################
 while 1:
-    get_oculus_data()
-    gp_data = get_gamepad_state(sixaxis)
-    msg = pickle.dumps(gp_data)
-    s.send(msg)
-    #print gp_data['btn_A'], gp_data['look_h'], gp_data['look_v']
-    if gp_data['btn_Y']:
-        print 'stopping'
+    try:
+        get_oculus_data()
+        gp_data = get_gamepad_state(sixaxis)
+        msg = pickle.dumps(gp_data)
+        s.send(msg)
+        print gp_data['btn_A'], gp_data['look_h'], gp_data['look_v']
+        if gp_data['btn_Y']:
+            print 'stopping'
 
-        s.close()
-        break
-    else:
-        data = s.recv(1024) #read back to make sure we can send again. Also nice to get sensor readings.
-        print 'Received:', repr(data)
+            s.close()
+            break
+        else:
+            data = s.recv(1024) #read back to make sure we can send again. Also nice to get sensor readings.
+            print 'Received:', repr(data)
 
-    wait.throttle()
+        wait.throttle()
+    finally:
+        if START_VIDEO:
+            vidprocess.terminate()

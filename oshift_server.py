@@ -17,12 +17,21 @@ except:
 from BrickPi import *  # import BrickPi.py file to use BrickPi operations
 import threading
 import subprocess
+import sys #for passing arguments
 
 
 ############## Constants & settings ################
 
-BLUETOOTH = False
-VIDEO = False
+if 'bt' in sys.argv:
+    BLUETOOTH = True
+else:
+    BLUETOOTH = False
+
+if 'vid' in sys.argv:
+    VIDEO = True
+else:
+    VIDEO = False
+
 CONNECTION_LIST = []  # list of socket clients
 RECV_BUFFER = 4096  # Advisable to keep it as an exponent of 2
 PORT = 50007        #data port
@@ -32,11 +41,12 @@ MOTOR_CMD_RATE = 30  # Max number of motor commands per second
 BT_CMD_RATE = 30
 
 FRAME_RATE = 24
-VIDEO_W = 1280
-VIDEO_H = 720
-BITRATE = 2000000
+VIDEO_W = 960
+VIDEO_H = 1080
+BITRATE = 1000000
 
 #STREAM_CMD = "raspivid -t 999999 -b 2000000 -o - | gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
+#STREAM_CMD = "gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
 STREAM_CMD = "gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
 
 #TODO add constants for fps, bitrate and video size.
@@ -145,6 +155,7 @@ class sendVideo(threading.Thread):
     def run(self):
         cmd = shlex.split(STREAM_CMD.format(self.ip_addr,VIDEO_PORT))
         streamer = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        #print "cmd"
 
         try:
             with picamera.PiCamera() as camera:
@@ -222,16 +233,25 @@ class motorControl(threading.Thread):  #This thread is used for keeping the moto
 
         pid_control_b = motorPID()
         pid_control_b.set_zero(int(BrickPi.Encoder[PORT_B]))
-        #position0_A = int(BrickPi.Encoder[PORT_A])
-        #position0_B = int(BrickPi.Encoder[PORT_B])
 
+        pid_control_c = motorPID(KP=2,KI=0,KD=0.1)
+        pid_control_c.set_zero(int(BrickPi.Encoder[PORT_C]))
+
+        #self.shooting = False
 
         while running:
             err_A = (BrickPi.Encoder[PORT_A] - gp_state['look_h'])
             err_B = (BrickPi.Encoder[PORT_B] - gp_state['look_v'])
+            if gp_state['btn_A']:# and not self.shooting:
+                err_C = (BrickPi.Encoder[PORT_C] - 400) #about 180 degrees
+            else:
+                err_C = (BrickPi.Encoder[PORT_C] - 0)
 
             BrickPi.MotorSpeed[PORT_A] = pid_control_a.get_power(err_A)  # Set Speed=0 which means stop
             BrickPi.MotorSpeed[PORT_B] = pid_control_b.get_power(err_B)
+            BrickPi.MotorSpeed[PORT_C] = pid_control_c.get_power(err_C)
+
+
 
             BrickPiUpdateValues()  # Ask BrickPi to update values for sensors/motors
             motorloop.throttle()  # Don't overload the brickpi too much, wait a bit.
@@ -262,10 +282,10 @@ if BLUETOOTH:
 while True:  #Main loop
     try:
         # Check for shooting
-        if gp_state['btn_A'] and not gun_busy:
-            thread3 = shoot()  #Setup and start the thread
-            thread3.setDaemon(True)
-            thread3.start()
+        # if gp_state['btn_A'] and not gun_busy:
+        #     thread3 = shoot()  #Setup and start the thread
+        #     thread3.setDaemon(True)
+        #     thread3.start()
 
         # Get the list sockets which are ready to be read through select
         read_sockets, write_sockets, error_sockets = select.select(CONNECTION_LIST, [], [])
@@ -316,11 +336,11 @@ while True:  #Main loop
                     continue
     except KeyboardInterrupt:  #Triggered by pressing Ctrl+C. Time to clean up.
         running = False  #Stop threads
+        video_playing =False
         if BLUETOOTH:
             conn.close()  #close BT rfcomm
-            rfcomm_process.terminate() #stop BT connection to NXT brick
-        if VIDEO:
-            video_process.terminate() #stop streaming
+            #rfcomm_process.terminate() #stop BT connection to NXT brick
+
 
         server_socket.close()
         print "Bye"
