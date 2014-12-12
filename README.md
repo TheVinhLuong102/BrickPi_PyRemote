@@ -17,6 +17,7 @@ Hardware used:
 * Large EV3 motors (2x)
 * Medium EV3 motor
 
+![Concept drawing](/photos/concept-sm.jpeg?raw=true "Concept drawing")
 
 # Usage #
 Get the necessary dependencies, put the server script on the BrickPi and run the remote script on your mac.
