@@ -94,13 +94,18 @@ You can test if the serial connection works by typing:
 sudo rfcomm connect rfcomm0
 ```
 
-Now install some python packages: Jaraco for sending commands to the NXT, and Picamera for controlling the camera inside
-our python scripts
+I used to do pip install jaraco.nxt for sending commands to the NXT, but I switched to nxt-python for sending commands
+from the RPi to the NXT. nxt-python makes connecting and opening rfcomm channels easier. And it has support for an USB
+connection to the brick, I should try that sometime.
 ```
-sudo pip install jaraco.nxt
-sudo pip install picamera
+sudo pip install nxt-python
+sudo apt-get install python-bluez
 ```
 
+Install Picamera for controlling the camera inside our python scripts
+```
+sudo pip install picamera
+```
 
 ## On the Mac ##
 It's easiest if you start by installing [homebrew](http://brew.sh). I'm a big fan. 
