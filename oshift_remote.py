@@ -4,6 +4,8 @@ import socket
 import sdl2
 import time
 import subprocess
+import shlex
+import threading
 
 try:
     import cPickle as pickle
@@ -38,9 +40,9 @@ sixaxis = {
 
 
 # Remote host configuration for opening sockets
-HOST = '10.42.35.36'  # The remote RPi with the server script running
+HOST = 'brickpiplus'  # The remote RPi with the server script running
 PORT = 50007  # The same port as used by the server
-MY_IP = '10.42.35.34'
+MY_IP = '192.168.179.21'
 
 # Oculus VR configuration
 OCULUS_ENABLED = False
@@ -120,8 +122,8 @@ def get_oculus_data():
 def get_gamepad_state(gp):
     #update joystick info
     sdl2.SDL_PumpEvents()
-    gp_state =  {'look_h': normalized_stick_value(gp,2,stick_max=300),
-                'look_v': normalized_stick_value(gp,3) * gp['invert_y'],
+    gp_state =  {'look_h': normalized_stick_value(gp,2,stick_max=1800),
+                'look_v': normalized_stick_value(gp,3,stick_max=200) * gp['invert_y'],
                 'move_x': normalized_stick_value(gp,0),
                 'move_y': normalized_stick_value(gp,1) * gp['invert_y'],
                 'btn_Y': sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btn_Y']),
@@ -154,14 +156,6 @@ time.sleep(3)
 data = s.recv(1024)
 print 'Handshake rcv:', repr(data)
 
-# start receiving video
-if START_VIDEO:
-    #cmd = "gst-launch-1.0 -e udpsrc port=5000 ! application/x-rtp, payload=96 ! rtpjitterbuffer ! rtph264depay ! avdec_h264 ! fpsdisplaysink sync=false text-overlay=false"
-    cmd = "gst-launch-1.0 udpsrc port=5000 ! application/x-rtp, payload=96, width=960, height=1080 ! rtpjitterbuffer ! rtph264depay ! decodebin ! glshader location=barrel1.fs ! glimagesink sync=false"
-    args = cmd.split(" ") #shlex.split() is safer, but this works.
-    vidprocess = subprocess.Popen(args, shell=True)
-
-
 # start oculus rift
 ovr_Initialize()
 hmd = ovrHmd_Create(0)
@@ -176,13 +170,26 @@ wait = throttler(FRAMERATE)
 
 
 ###################Main Loop#######################
+class VideoPlayer(threading.Thread):
+    global vidprocess
+    # start receiving video
+    if START_VIDEO:
+        #cmd = "gst-launch-1.0 -e udpsrc port=5000 ! application/x-rtp, payload=96 ! rtpjitterbuffer ! rtph264depay ! avdec_h264 ! fpsdisplaysink sync=false text-overlay=false"
+        cmd = "gst-launch-1.0 udpsrc port=5000 ! application/x-rtp, payload=96, width=960, height=1080 ! rtpjitterbuffer ! rtph264depay ! decodebin ! glimagesink sync=false"
+        args = shlex.split(cmd)
+        vidprocess = subprocess.call(args)
+
+thread1 = VideoPlayer()  #Setup and start the thread
+thread1.setDaemon(True)
+thread1.start()
+
 while 1:
     try:
         get_oculus_data()
         gp_data = get_gamepad_state(sixaxis)
         msg = pickle.dumps(gp_data)
         s.send(msg)
-        print gp_data['btn_A'], gp_data['look_h'], gp_data['look_v']
+        #print gp_data['btn_A'], gp_data['look_h'], gp_data['look_v']
         if gp_data['btn_Y']:
             print 'stopping'
 
@@ -193,6 +200,8 @@ while 1:
             print 'Received:', repr(data)
 
         wait.throttle()
-    finally:
+    except KeyboardInterrupt:
         if START_VIDEO:
+            print "Cleaning up video..."
             vidprocess.terminate()
+            break
