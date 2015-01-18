@@ -1,10 +1,18 @@
 __author__ = 'anton'
 
 #these are needed for BT communications with an NXT brick
-from jaraco.nxt import *
-from jaraco.nxt.messages import *
+#from jaraco.nxt import *
+#from jaraco.nxt.messages import *
+
+#Instead of Jaraco, using nxt-python this time
+from nxt.brick import Brick
+from nxt.locator import find_one_brick
+from nxt.motor import Motor, PORT_A, PORT_B, PORT_C
+import nxt.bluesock
+
 import math
-import shlex, picamera
+import shlex
+import picamera
 
 #to open sockets en receive data from client
 import socket, time, select
@@ -32,6 +40,9 @@ if 'vid' in sys.argv:
 else:
     VIDEO = False
 
+BRICK_ADDR='00:16:53:0E:1C:AC'
+BRICK_NAME='NXT'
+
 CONNECTION_LIST = []  # list of socket clients
 RECV_BUFFER = 4096  # Advisable to keep it as an exponent of 2
 PORT = 50007        #data port
@@ -41,9 +52,13 @@ MOTOR_CMD_RATE = 30  # Max number of motor commands per second
 BT_CMD_RATE = 30
 
 FRAME_RATE = 24
-VIDEO_W = 960
-VIDEO_H = 1080
+VIDEO_W = 1280
+VIDEO_H = 720
 BITRATE = 1000000
+
+MOTOR_A_RANGE = (-300,300)
+MOTOR_B_RANGE = (-100,100)
+MOTOR_C_RANGE = (0,400)
 
 #STREAM_CMD = "raspivid -t 999999 -b 2000000 -o - | gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
 #STREAM_CMD = "gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink host={0} port={1}"
@@ -52,10 +67,22 @@ STREAM_CMD = "gst-launch-1.0 -e -vvv fdsrc ! h264parse ! rtph264pay pt=96 config
 #TODO add constants for fps, bitrate and video size.
 
 ########### Helper functions ######################
-def clamp(n, minn, maxn):
+def clean_up():
+    global running,video_playing,server_socket
+    running = False  #Stop threads
+    video_playing =False
+    # if BLUETOOTH:
+    #     conn.close()  #close BT rfcomm
+    #     #rfcomm_process.terminate() #stop BT connection to NXT brick
+    server_socket.close()
+    print "Bye"
+
+
+def clamp(n, (minn, maxn)):
     return max(min(maxn, n), minn)
 
-class throttler(object):
+
+class Throttler(object):
     def __init__(self, framerate):
         self.fps = framerate
         self.timestamp = time.time()
@@ -69,7 +96,7 @@ class throttler(object):
 
 
 class motorPID(object):
-    def __init__(self, KP=1.8, KI=0.1, KD=0.15):
+    def __init__(self, KP=.6, KI=0.05, KD=0.0):
         self.Kp = KP
         self.Ki = KI
         self.Kd = KD
@@ -80,6 +107,9 @@ class motorPID(object):
 
     def set_zero(self, zero_pos):
         self.zero = zero_pos
+
+    def inc_zero(self, increment):
+        self.zero += increment
 
     def get_power(self, error):
         dt = time.time() - self.timestamp
@@ -105,27 +135,18 @@ def start_rfcomm():
 
 ############# Initialize ##########################
 
-if BLUETOOTH:
-    # Start a BT connection over to the NXT
-    print "Initializing Bluetooth"
-    # rfcomm_process = start_rfcomm()
-    # open the connection. Get this string from /dev/bluetooth/rfcomm.conf
-    conn = Connection('/dev/rfcomm0')  # antons NXT
-
-# Setup BrickPi and motors
+#  Setup BrickPi and motors
 print "Revving up engines"
 BrickPiSetup()  # setup the serial port for communication
-BrickPi.MotorEnable[PORT_A] = 1  #Enable the Motor A
-BrickPi.MotorEnable[PORT_B] = 1  #Enable the Motor B
-BrickPi.MotorEnable[PORT_C] = 1  #Enable the Motor C
+BrickPi.MotorEnable[PORT_A] = 1  #Enable the Motor A, panning horizontal
+BrickPi.MotorEnable[PORT_B] = 1  #Enable the Motor B, panning vertical
+BrickPi.MotorEnable[PORT_C] = 1  #Enable the Motor C, cannon
 
 #BrickPi.SensorType[PORT_4] = TYPE_SENSOR_ULTRASONIC_CONT	#Setting the type of sensor at PORT4
-BrickPiSetupSensors()  #Send the properties of sensors to BrickPi
+#BrickPiSetupSensors()  #Send the properties of sensors to BrickPi
 
 # Initialize server socket
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-# this has no effect, why ?
-# server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server_socket.bind(("0.0.0.0", PORT))
 server_socket.listen(10)
 
@@ -134,14 +155,13 @@ CONNECTION_LIST.append(server_socket)
 print "Chat server started on port " + str(PORT)
 
 
-#Initialize globals
+# Initialize globals
 video_playing = False
 running = True
-gp_state = {'look_h': 0, 'look_v': 0, 'move_x': 0, 'move_y': 0, 'btn_start': 0, 'btn_A': 0, 'btn_lshoulder': 0,
+gp_state = {'look_h': 0, 'look_v': 0, 'move_x': 0, 'move_y': 0, 'btn_start': 0, 'btn_A': 0, 'btn_Y': 0, 'btn_lshoulder': 0,
             'btn_rshoulder': 0}
-motorloop = throttler(MOTOR_CMD_RATE)
-btloop = throttler(BT_CMD_RATE)
-gun_busy = False
+motorloop = Throttler(MOTOR_CMD_RATE)
+btloop = Throttler(BT_CMD_RATE)
 
 
 
@@ -177,6 +197,19 @@ class sendVideo(threading.Thread):
 
 class btRemoteControl(threading.Thread):
     def run(self):
+        # Start a BT connection over to the NXT
+        print "Initializing Bluetooth"
+        # rfcomm_process = start_rfcomm()
+        # open the connection. Get this string from /dev/bluetooth/rfcomm.conf
+        #conn = Connection('/dev/rfcomm0')  # antons NXT
+        try:
+            #brick = find_one_brick(name=BRICK_NAME)
+            brick = nxt.bluesock.BlueSock(BRICK_ADDR).connect()
+        except:
+            print "Brick {0} not found".format(BRICK_NAME)
+            return
+
+        bt_motors = (Motor(brick, PORT_A),Motor(brick, PORT_B),Motor(brick, PORT_C))
         while running:
             # use shoulder buttons on the game pad to make the omnibot rotate around it's axis.
             turnpower = 0
@@ -184,34 +217,27 @@ class btRemoteControl(threading.Thread):
             if gp_state['btn_lshoulder']: turnpower = -75
 
             # convert joystick x and y to a direction and power (deviation from the centre)
-            joy_direction = math.atan2(gp_state['move_y'], gp_state['move_x'])  # in radians
+            joy_direction = math.atan2(gp_state['move_x'], gp_state['move_y'])  # in radians
             joy_power = (gp_state['move_x'] ** 2 + gp_state['move_y'] ** 2) ** 0.5  # pythagoras
 
             # building a list of three motor commands to send over
-            cmds = []
-            for i in range(3):
+            #cmds = []
+            i = 0
+            for motor in bt_motors:
+
                 # for each motor the angle has a different offset (0, 120 and 240 degrees)
                 angle = i * 2 * 3.1415 / 3 + joy_direction
 
                 # motor power calculation. A simple sin.
                 motorpower = math.sin(angle) * joy_power + turnpower
 
-                motorpower = round(clamp(motorpower, -100, 100))
+                motorpower = round(clamp(motorpower, (-100, 100)))
 
-                cmds.append(SetOutputState(
-                    i,
-                    motor_on=True,
-                    set_power=motorpower,
-                    run_state=RunState.running,
-                    use_regulation=True,
-                    regulation_mode=RegulationMode.motor_speed
-                )
-                )
-
-            map(conn.send, cmds)
-
+                motor.run(motorpower,regulated=True)
+                i += 1
             # wait a bit before sending more commands. If we don't the BT buffer overflows.
             btloop.throttle()
+
 
 
 
@@ -234,41 +260,42 @@ class motorControl(threading.Thread):  #This thread is used for keeping the moto
         pid_control_b = motorPID()
         pid_control_b.set_zero(int(BrickPi.Encoder[PORT_B]))
 
-        pid_control_c = motorPID(KP=2,KI=0,KD=0.1)
+        pid_control_c = motorPID()
         pid_control_c.set_zero(int(BrickPi.Encoder[PORT_C]))
 
         #self.shooting = False
 
         while running:
-            err_A = (BrickPi.Encoder[PORT_A] - gp_state['look_h'])
-            err_B = (BrickPi.Encoder[PORT_B] - gp_state['look_v'])
-            if gp_state['btn_A']:# and not self.shooting:
-                err_C = (BrickPi.Encoder[PORT_C] - 400) #about 180 degrees
+            if len(CONNECTION_LIST) > 1: #only turn motors if there's a client connected on the socket
+                err_A = (BrickPi.Encoder[PORT_A] - gp_state['look_h'])
+
+
+                err_B = (BrickPi.Encoder[PORT_B] - gp_state['look_v'])
+
+                # when the head turns horizontally, the vertical axis has turn to match
+                # the rotation, because the axles are concentric.
+                # the horizontal rotation is in a ratio of 56:8, using a large turntable and an 8 tooth gear
+
+                v_look_zero_offset = BrickPi.Encoder[PORT_A]-pid_control_a.zero     # get rotation of motor A
+                err_B -= v_look_zero_offset*8.0/56                                                 # increment port b zero with this number
+
+                if gp_state['btn_A']:
+                    err_C = (BrickPi.Encoder[PORT_C] - 6000)
+                else:
+                    err_C = (BrickPi.Encoder[PORT_C] - 0)
+
+                BrickPi.MotorSpeed[PORT_A] = pid_control_a.get_power(err_A)
+                BrickPi.MotorSpeed[PORT_B] = pid_control_b.get_power(err_B)
+                BrickPi.MotorSpeed[PORT_C] = pid_control_c.get_power(err_C)
+
+
+
+                BrickPiUpdateValues()  # Ask BrickPi to update values for sensors/motors
             else:
-                err_C = (BrickPi.Encoder[PORT_C] - 0)
-
-            BrickPi.MotorSpeed[PORT_A] = pid_control_a.get_power(err_A)  # Set Speed=0 which means stop
-            BrickPi.MotorSpeed[PORT_B] = pid_control_b.get_power(err_B)
-            BrickPi.MotorSpeed[PORT_C] = pid_control_c.get_power(err_C)
-
-
-
-            BrickPiUpdateValues()  # Ask BrickPi to update values for sensors/motors
+                BrickPi.MotorSpeed[PORT_A] = 0
+                BrickPi.MotorSpeed[PORT_B] = 0
+                BrickPi.MotorSpeed[PORT_C] = 0
             motorloop.throttle()  # Don't overload the brickpi too much, wait a bit.
-
-class shoot(threading.Thread):
-    def run(self):
-        global gun_busy
-        gun_busy = True
-        BrickPi.MotorSpeed[PORT_C] = 200 #naar achter
-        #BrickPiUpdateValues()
-        time.sleep(.5)
-        BrickPi.MotorSpeed[PORT_C] = -200 #naar voor
-        #BrickPiUpdateValues()
-        time.sleep(1)
-        BrickPi.MotorSpeed[PORT_C] = 0
-        gun_busy = False
-
 
 thread1 = motorControl()  #Setup and start the thread
 thread1.setDaemon(True)
@@ -320,6 +347,7 @@ while True:  #Main loop
 
                     else:
                         gp_state = rcvd_dict
+
                     # acknowledge
 
 
@@ -327,21 +355,13 @@ while True:  #Main loop
                 except:
                     #broadcast_data(sock, "Client (%s, %s) is offline" % addr)
                     print "Client (%s, %s) is offline" % addr
-                    video_playing =False
+
                     sock.close()
-
-                    #video stream moet ook stoppen hier TODO
-
                     CONNECTION_LIST.remove(sock)
-                    continue
+                    clean_up()
+
+                    #continue
+                    break
     except KeyboardInterrupt:  #Triggered by pressing Ctrl+C. Time to clean up.
-        running = False  #Stop threads
-        video_playing =False
-        if BLUETOOTH:
-            conn.close()  #close BT rfcomm
-            #rfcomm_process.terminate() #stop BT connection to NXT brick
-
-
-        server_socket.close()
-        print "Bye"
+        clean_up()
         break  #Exit
