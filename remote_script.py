@@ -13,9 +13,32 @@ except:
     import pickle
 from oculusvr import *
 
-# ##########Constants & configuration################
-# Start a video process or not
+
+
+
+
+
+############Constants & configuration################
+
+# Start a gstreamer instance to receive streaming video if true.
 RCV_VIDEO = True
+
+# Remote host configuration for opening sockets
+HOST = 'brickpi2'  # The remote RPi with the server script running
+PORT = 50007  # The same port as used by the server
+MY_IP = '192.168.179.21'
+
+
+# BrickPi Constants for robot layout config
+PORT_A = 0
+PORT_B = 1
+PORT_C = 2
+PORT_D = 3
+
+PORT_1 = 0
+PORT_2 = 1
+PORT_3 = 2
+PORT_4 = 3
 
 # Oculus VR configuration
 OCULUS_ENABLED = False
@@ -27,12 +50,12 @@ sticks = sdl2.SDL_Init(sdl2.SDL_INIT_JOYSTICK)
 sixaxis = {
     'gamepad_num': 0,
     'gp_object': sdl2.SDL_JoystickOpen(0),  # sixaxis is the first gamepad on my system
-    'stick_range': (-32768,32768),  # min stick position, max stick position. Input range.
+    'stick_range': (-32768, 32768),  # min stick position, max stick position. Input range.
     'sticks': {
-        'look_h': {'id':2, 'range':(-1000, 1000)},  # stick id and output range. Invert the numbers to invert the axis.
-        'look_v': {'id':3, 'range':(200, -200)},
-        'move_x': {'id':0, 'range':(-100, 100)},
-        'move_y': {'id':1, 'range':(100, -100)}
+        'look_h': {'id': 2, 'invert': 1},
+        'look_v': {'id': 3, 'invert': -1},
+        'move_x': {'id': 0, 'invert': 1},
+        'move_y': {'id': 1, 'invert': -1}
     },
     'btns': {
         'dpad_up': 4,
@@ -52,11 +75,50 @@ sixaxis = {
     }
 }
 
+# Robot configuration
+robot = {
+    'motors': {
+        'motor_A': {
+            'port': PORT_A,
+            'control': 'look_h',
+            'type': 'servo',
+            'range': (-1000, 1000),
+            'trim_down': ['dpad_left'],
+            'trim_up': ['dpad_right'],
+            'trim_step': 10
+        },
+        'motor_B': {
+            'port': PORT_B,
+            'control': 'look_v',
+            'type': 'servo',
+            'range': (200, -200),
+            'co_rotate': 'motor_A',
+            'co_rotate_factor': -8.0 / 56,
+            'co_rotate_leading': 0.1,
+            'trim_down': ['dpad_up'],
+            'trim_up': ['dpad_down'],
+            'trim_step': 10
+        },
+        'motor_C': {  # shoot
+                      'port': PORT_C,
+                      'control': 'btn_r2',
+                      'type': 'servo',
+                      'range': (0, 6000),
+                      'trim_down': ['dpad_up', 'btn_l2'],
+                      'trim_up': ['dpad_down', 'btn_l2'],
+                      'trim_step': 10
+        },
+        'motor_D': {  # forward/rev
+                      'port': PORT_D,
+                      'control': 'move_y',
+                      'type': 'speed',
+                      'range': (-100, 100)
+        }
+    },
+    'sensors': {}
+}
 
-# Remote host configuration for opening sockets
-HOST = 'brickpiplus'  # The remote RPi with the server script running
-PORT = 50007  # The same port as used by the server
-MY_IP = '192.168.179.21'
+
 
 rotationC = 100  # constants to convert input to degrees or sometheing
 rollC = 1115 - 1000
@@ -75,7 +137,8 @@ FRAMERATE = 50  # Number of loops (packets to send) per second
 
 
 
-# ############### Helper functions ####################
+
+################# Helper functions ##################
 def scale(val, src, dst):
     """
     Scale the given value from the scale of src to the scale of dst.
@@ -89,13 +152,18 @@ def scale(val, src, dst):
     return (float(val - src[0]) / (src[1] - src[0])) * (dst[1] - dst[0]) + dst[0]
 
 
-def normalized_stick_value(gp, axis, tgt_range, deadzone=5):
-    stick_value = scale(sdl2.SDL_JoystickGetAxis(gp['gp_object'], axis), gp['stick_range'], tgt_range)
-    deadzone_range = tuple(n*deadzone/100.0 for n in tgt_range)
+def scaled_stick_value(gp, axis, invert, deadzone_pct=4):
+    stick_value = scale(sdl2.SDL_JoystickGetAxis(gp['gp_object'], axis),
+                        gp['stick_range'],
+                        (-32768, 32768)
+    ) * invert
+
+    deadzone_range = tuple(n * deadzone_pct / 100.0 for n in (-32768, 32768))
+
     if min(deadzone_range) < stick_value < max(deadzone_range):
         return 0
     else:
-        return stick_value
+        return int(stick_value)
 
 
 class throttler(object):
@@ -154,19 +222,20 @@ def get_gamepad_state(gp):
     gp_state = {}
 
     for stick in gp['sticks']:
-        gp_state[stick] = normalized_stick_value(gp, gp['sticks'][stick]['id'], gp['sticks'][stick]['range'])
+        gp_state[stick] = scaled_stick_value(gp, gp['sticks'][stick]['id'], gp['sticks'][stick]['invert'])
 
     for btn in gp['btns']:
-        gp_state[btn] = sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btns'][btn])
+        gp_state[btn] = sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btns'][btn]) * 32768
+        #this way a pressed button outputs a number equivalent to a fully bent stick
 
     if OCULUS_ENABLED:
-        gp_state['look_h'] = int(Y_AXIS * 10)  # normalized_stick_value(gp,2,stick_max=300),
-        gp_state['look_v'] = int(X_AXIS * -1.9)  # normalized_stick_value(gp,3) * gp['invert_y'],
+        gp_state['look_h'] = int(Y_AXIS * 10)  # scaled_stick_value(gp,2,stick_max=300),
+        gp_state['look_v'] = int(X_AXIS * -1.9)  # scaled_stick_value(gp,3) * gp['invert_y'],
 
     return gp_state
 
 
-# ################## Initialization ###################
+#################### Initialization #################
 
 # Open socket to the Raspberry Pi
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -174,7 +243,7 @@ s.connect((HOST, PORT))
 
 # Send our IP address across, and maybe some other config info
 # handshake = {'ip_addr': socket.gethostbyname(socket.gethostname())} # the slower way is: socket.gethostbyname(socket.getfqdn())
-handshake = {'ip_addr': MY_IP}  # the slower way is: socket.gethostbyname(socket.getfqdn())
+handshake = {'ip_addr': MY_IP, 'robot_type': robot}  # the slower way is: socket.gethostbyname(socket.getfqdn())
 msg = pickle.dumps(handshake)
 s.send(msg)
 time.sleep(3)
@@ -202,23 +271,22 @@ if RCV_VIDEO:  # Start video player
     vidprocess = subprocess.Popen(args, stdin=subprocess.PIPE)
 
 
-# ##################Main Loop#######################
+
+
+
+################### Main Loop #######################
+
 while 1:
     try:
         if OCULUS_ENABLED: get_oculus_data()
 
         gp_data = get_gamepad_state(sixaxis)
         msg = pickle.dumps(gp_data)
+        print gp_data
         s.send(msg)
 
-        if gp_data['btn_Y']:
-            print 'stopping'
-
-            s.close()
-            break
-        else:
-            data = s.recv(1024)  #read back to make sure we can send again. Also nice to get sensor readings.
-            print 'Received:', repr(data)
+        data = s.recv(1024)  # read back to make sure we can send again. Also nice to get sensor readings.
+        print 'Received:', repr(data)
 
         wait.throttle()
     except KeyboardInterrupt:

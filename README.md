@@ -45,6 +45,7 @@ And set up
 If you feel like it, upgrade all of the installed stuff and remove redundant ones after the upgrade
  but it shouldn't be necessary on a new image:
 ```bash
+sudo apt-get update
 sudo apt-get upgrade
 sudo apt-get autoremove
 ```
@@ -53,28 +54,26 @@ Now is also a good time to set up your wifi. It's easy if you have the Pi connec
 VNC set up. Otherwise you can [set up wifi via the command line](http://www.howtogeek.com/167425/how-to-setup-wi-fi-on-your-raspberry-pi-via-the-command-line/)
 
 Next you'll have to install the BrickPi stuff. Clone their repository, install and follow the on-screen instructions
- like so:
- ```bash
- git clone https://github.com/DexterInd/BrickPi.git
- cd BrickPi/Setup Files/
- sudo chmod +x install.sh
- sudo ./install.sh
- cd ~
- git clone https://github.com/DexterInd/BrickPi_Python.git
- cd BrickPi_Python/
- python setup.py install
- ```
- 
- Next you have to install gstreamer. I had some trouble with this on the Dexter Industries image, but on the Wheezy it worked 
- right away.
- ```shell
- sudo apt-get update
+like so:
+```bash
+git clone https://github.com/DexterInd/BrickPi.git
+cd BrickPi/Setup Files/
+sudo chmod +x install.sh
+sudo ./install.sh
+cd ~
+git clone https://github.com/DexterInd/BrickPi_Python.git
+cd BrickPi_Python/
+python setup.py install
+```
+
+Next you have to install gstreamer. I had some trouble with this on the Dexter Industries image, but on the Wheezy it worked
+right away.
+```shell
 sudo apt-get install gstreamer1.0
 ```
 
 Then there's bluetooth to be set up. 
 ```shell
-sudo apt-get update
 sudo apt-get install bluetooth bluez-utils blueman
 ```
 
