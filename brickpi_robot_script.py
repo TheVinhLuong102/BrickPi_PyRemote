@@ -49,7 +49,7 @@ RECV_BUFFER = 4096  # Advisable to keep it as an exponent of 2
 PORT = 50007  # data port
 VIDEO_PORT = 5000
 
-MOTOR_CMD_RATE = 30  # Max number of motor commands per second
+MOTOR_CMD_RATE = 20  # Max number of motor commands per second
 BT_CMD_RATE = 30
 
 RASPIVID_CMD = "raspivid -t 999999 -b 2000000 -o -"
@@ -74,6 +74,15 @@ def clean_up():
     print "Bye"
 
 
+def log(*args):
+    global logback
+    logback += args
+    print args
+
+def logclear():
+    global logback
+    logback = []
+
 def clamp(n, (minn, maxn)):
     return max(min(maxn, n), minn)
 
@@ -96,7 +105,7 @@ def scaled_gamepad_input(gamepad_input_key, output_range):
         scale_src = (0, 1)
     else:
         scale_src = STICK_RANGE
-    return scale(gp_state[gamepad_input_key], scale_src, output_range)
+    return int(scale(gp_state[gamepad_input_key], scale_src, output_range))
 
 
 class Throttler(object):
@@ -110,6 +119,32 @@ class Throttler(object):
         if wait_time > 0:
             time.sleep(wait_time)
         self.timestamp = time.time()
+
+class Logger(object):
+    """
+    Logs events to the console and later maybe to a file.
+    Collects log messages to send over the network connection
+    """
+    def __init__(self):
+        self.loglist = []
+        self.new_line_ready = False
+
+    def log(self,*args):
+        self.loglist += str(args)
+
+    def newline(self):
+        self.lastline = str(self.loglist)
+        print self.lastline
+        self.loglist = []
+        self.new_line_ready = True
+
+    def get_lastline(self):
+        self.new_line_ready = False
+        return self.lastline
+
+    def new_line_ready(self):
+        return self.new_line_ready
+
 
 
 class motorPID(object):
@@ -143,12 +178,15 @@ class motorPID(object):
 
 ################### Initialize ##########################
 
+logback = []
+
 #  Setup BrickPi and motors
-print "Revving up engines"
+log("Revving up engines")
 BrickPiSetup()  # setup the serial port for communication
 BrickPi.MotorEnable[PORT_A] = 1  #Enable the Motor A, panning horizontal
 BrickPi.MotorEnable[PORT_B] = 1  #Enable the Motor B, panning vertical
 BrickPi.MotorEnable[PORT_C] = 1  #Enable the Motor C, cannon
+BrickPi.MotorEnable[PORT_D] = 1  #Enable the Motor C, cannon
 
 #BrickPi.SensorType[PORT_4] = TYPE_SENSOR_ULTRASONIC_CONT	#Setting the type of sensor at PORT4
 #BrickPiSetupSensors()  #Send the properties of sensors to BrickPi
@@ -160,7 +198,7 @@ server_socket.listen(10)
 
 # Add server socket to the list of readable connections
 CONNECTION_LIST.append(server_socket)
-print "Chat server started on port " + str(PORT)
+log("Chat server started on port " + str(PORT))
 
 # Initialize globals
 video_playing = False
@@ -267,106 +305,91 @@ class motorControl(threading.Thread):
         # Ask BrickPi to update values for sensors/motors
         # Make sure we have something before we start running
         # So we wait until no_values goes 0, which means values updated OK
-        print "started motorloop"
+
         no_values = 1
         while no_values:
             no_values = BrickPiUpdateValues()
 
-        print "got values"
+        try:
+            motorPIDs = {}
+            for m_key in robot['motors']:
+                motorPIDs[m_key] = motorPID()
+                print BrickPi.Encoder[robot['motors'][m_key]['port']], robot['motors'][m_key]['port']
+                motorPIDs[m_key].set_zero(int(BrickPi.Encoder[robot['motors'][m_key]['port']]))
 
-        for m_key in robot['motors']:
-            print robot['motors'][m_key]
-            robot['motors'][m_key]['PID'] = motorPID()
-            robot['motors'][m_key]['PID'].set_zero(int(BrickPi.Encoder[robot['motors'][m_key]['port']]))
+                # Now we can start!
+            # pid_control_a = motorPID()
+            # pid_control_a.set_zero(int(BrickPi.Encoder[PORT_A]))
+            #
+            # pid_control_b = motorPID()
+            # pid_control_b.set_zero(int(BrickPi.Encoder[PORT_B]))
+            #
+            # pid_control_c = motorPID()
+            # pid_control_c.set_zero(int(BrickPi.Encoder[PORT_C]))
+            print motorPIDs['motor_B'].zero
+            while running:
+                if len(CONNECTION_LIST) > 1:  #only turn motors if there's a client connected on the socket
 
-        # Now we can start!
-        # pid_control_a = motorPID()
-        # pid_control_a.set_zero(int(BrickPi.Encoder[PORT_A]))
-        #
-        # pid_control_b = motorPID()
-        # pid_control_b.set_zero(int(BrickPi.Encoder[PORT_B]))
-        #
-        # pid_control_c = motorPID()
-        # pid_control_c.set_zero(int(BrickPi.Encoder[PORT_C]))
+                    for m_key in robot['motors']:
+                        motor = robot['motors'][m_key]  #shortcut for reading values, for writing or accessing functions
+                        #I need to write the full robot['motors'][m_key]. I think.
 
-        while running:
-            if len(CONNECTION_LIST) > 1:  #only turn motors if there's a client connected on the socket
+                        if motor['type'] == 'servo':
+                            #Zero point calibration with dpad
+                            if all([gp_state[btn] for btn in motor['trim_up']]):
+                                motorPIDs[m_key].inc_zero(motor['trim_step'])
 
-                for m_key in robot['motors']:
-                    motor = robot['motors'][m_key]  #shortcut for reading values, for writing or accessing functions
-                    #I need to write the full robot['motors'][m_key]. I think.
+                            if all([gp_state[btn] for btn in motor['trim_down']]):
+                                motorPIDs[m_key].inc_zero(motor['trim_step'] * -1)
 
-                    if motor['type'] == 'servo':
-                        #Zero point calibration with dpad
-                        if all([gp_state[btn] for btn in motor['trim_up']]):
-                            robot['motors'][m_key]['PID'].inc_zero(motor['trim_step'])
-
-                        if all([gp_state[btn] for btn in motor['trim_down']]):
-                            robot['motors'][m_key]['PID'].inc_zero(motor['trim_step'] * -1)
-
-                            # if gp_state['dpad_up']:
-                            #     if gp_state['btn_l2']:
-                            #         pid_control_c.inc_zero(-100)
-                            #     else:
-                            #         pid_control_b.inc_zero(-10)
-                            #     time.sleep(0.1)
-                            # if gp_state['dpad_down']:
-                            #     if gp_state['btn_l2']:
-                            #         pid_control_c.inc_zero(100)
-                            #     else:
-                            #         pid_control_b.inc_zero(10)
-                            #     time.sleep(0.1)
-                            # if gp_state['dpad_left']:
-                            #     pid_control_a.inc_zero(-10)
-                            #     time.sleep(0.1)
-                            # if gp_state['dpad_right']:
-                            #     pid_control_a.inc_zero(10)
-                            #     time.sleep(0.1)
-
-                        target = scaled_gamepad_input(motor['control'], motor['range'])
-                        err = BrickPi.Encoder[motor['port']] - target
-                        #print err
-                        # err_B = (BrickPi.Encoder[PORT_B] + gp_state['look_v'])
-
-                        # when the head turns horizontally, the vertical axis has turn to match
-                        # the rotation, because the axles are concentric.
-                        # the horizontal rotation is in a ratio of 56:8, using a large turntable and an 8 tooth gear
-
-                        if 'co_rotate' in motor:
-                            co_motor = robot['motors'][motor['co_rotate']]
-                            rotation = BrickPi.Encoder[co_motor['port']] - co_motor[
-                                'PID'].zero  # get rotation of co-rotational motor
-                            rotation_speed = BrickPi.Encoder[co_motor['port']] - scale(gp_state[co_motor['control']],
-                                                                                       STICK_RANGE, co_motor['range'])
-                            err += rotation * motor['co_rotate_factor'] + rotation_speed * motor[
-                                'co_rotate_leading']  # offset motor B target with this number
-
-                            # v_look_zero_offset = BrickPi.Encoder[PORT_A] - pid_control_a.zero  # get rotation of motor A
-                            # err_B += v_look_zero_offset * -8.0 / 56 + err_A * 0.1  # offset motor B target with this number
-
-                            # if gp_state['btn_r2']: #shoot with the bottom right shoulder button
-                            #     err_C = (BrickPi.Encoder[PORT_C] + 6000)
-                            # else:
-                            #     err_C = (BrickPi.Encoder[PORT_C] - 0)
-
-                        BrickPi.MotorSpeed[motor['port']] = robot['motors'][m_key]['PID'].get_power(err)
-                    # BrickPi.MotorSpeed[PORT_A] = pid_control_a.get_power(err_A)
-                    # BrickPi.MotorSpeed[PORT_B] = pid_control_b.get_power(err_B)
-                    # BrickPi.MotorSpeed[PORT_C] = pid_control_c.get_power(err_C)
-
-                    if motor['type'] == 'speed':
-                        target_speed = scale(gp_state[motor['control']], STICK_RANGE, motor['range'])
-                        print target_speed
-                        BrickPi.MotorSpeed[motor['port']] = target_speed
-
-                    BrickPiUpdateValues()  # Ask BrickPi to update values for sensors/motors
+                            target = scaled_gamepad_input(motor['control'], motor['range'])
+                            err = BrickPi.Encoder[motor['port']] - target
 
 
-            else:  #No client connected on the socket. Power down the motors.
-                BrickPi.MotorSpeed[PORT_A] = 0
-                BrickPi.MotorSpeed[PORT_B] = 0
-                BrickPi.MotorSpeed[PORT_C] = 0
-            motorloop.throttle()  # Don't overload the brickpi too much, wait a bit.
+                            if 'co_rotate' in motor:
+                                # when the head turns horizontally, the vertical axis has turn to match
+                                # the rotation, because the axles are concentric.
+                                # the horizontal rotation is in a ratio of 56:8, using a large turntable and an 8 tooth gear
+
+                                co_motor = robot['motors'][motor['co_rotate']]
+                                rotation = BrickPi.Encoder[co_motor['port']] - co_motor[
+                                    'PID'].zero  # get rotation of co-rotational motor
+                                rotation_speed = BrickPi.Encoder[co_motor['port']] - scale(gp_state[co_motor['control']],
+                                                                                           STICK_RANGE, co_motor['range'])
+                                err += rotation * motor['co_rotate_factor'] + rotation_speed * motor[
+                                    'co_rotate_leading']  # offset motor B target with this number
+
+                                # v_look_zero_offset = BrickPi.Encoder[PORT_A] - pid_control_a.zero  # get rotation of motor A
+                                # err_B += v_look_zero_offset * -8.0 / 56 + err_A * 0.1  # offset motor B target with this number
+
+                                # if gp_state['btn_r2']: #shoot with the bottom right shoulder button
+                                #     err_C = (BrickPi.Encoder[PORT_C] + 6000)
+                                # else:
+                                #     err_C = (BrickPi.Encoder[PORT_C] - 0)
+
+                            pwr=motorPIDs[m_key].get_power(err)
+                            log(m_key,target,err,pwr)
+                            BrickPi.MotorSpeed[motor['port']] = pwr
+
+                        if motor['type'] == 'speed':
+                            target_speed = scaled_gamepad_input(motor['control'], motor['range'])
+                            log(m_key,target_speed)
+                            BrickPi.MotorSpeed[motor['port']] = target_speed
+
+                        BrickPiUpdateValues()  # Ask BrickPi to update values for sensors/motors
+
+
+                else:  #No client connected on the socket. Power down the motors.
+                    BrickPi.MotorSpeed[PORT_A] = 0
+                    BrickPi.MotorSpeed[PORT_B] = 0
+                    BrickPi.MotorSpeed[PORT_C] = 0
+                    BrickPi.MotorSpeed[PORT_D] = 0
+
+                motorloop.throttle()  # Don't overload the brickpi too much, wait a bit.
+                logclear()
+        except:
+            log(sys.exc_info()[0])
+            raise
 
 
 if BLUETOOTH:  #Start BT thread
@@ -387,7 +410,7 @@ while True:
                 # Handle the case in which there is a new connection recieved through server_socket
                 sockfd, addr = server_socket.accept()
                 CONNECTION_LIST.append(sockfd)
-                print "Client (%s, %s) connected" % addr
+                log("Client (%s, %s) connected" % addr)
 
 
             #Some incoming message from a connected client
@@ -396,9 +419,14 @@ while True:
                 try:
                     #In Windows, sometimes when a TCP program closes abruptly,
                     # a "Connection reset by peer" exception will be thrown
+                    send_data = pickle.dumps(logback)
+                    print logback
                     data = sock.recv(RECV_BUFFER)
+                    sock.send(send_data)
                     rcvd_dict = pickle.loads(data)
-                    sock.send('OK ... ')
+
+
+                    logclear()
 
                     if 'ip_addr' in rcvd_dict:
                         if VIDEO:
@@ -413,7 +441,7 @@ while True:
                         thread1 = motorControl()  #Setup and start the thread
                         thread1.setDaemon(True)
                         thread1.start()
-                        print robot
+                        logclear()
 
                     else:
                         gp_state = rcvd_dict

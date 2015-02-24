@@ -1,6 +1,6 @@
 #!/bin/bash
 
-RPI="brickpi2"
+RPI="brickpiplus"
 SERVER_SCRIPT="brickpi_robot_script.py"
 
 #copy the server script over. overwrite switch?

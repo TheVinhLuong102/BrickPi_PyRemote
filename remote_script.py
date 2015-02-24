@@ -21,10 +21,10 @@ from oculusvr import *
 ############Constants & configuration################
 
 # Start a gstreamer instance to receive streaming video if true.
-RCV_VIDEO = True
+RCV_VIDEO = False
 
 # Remote host configuration for opening sockets
-HOST = 'brickpi2'  # The remote RPi with the server script running
+HOST = 'brickpiplus'  # The remote RPi with the server script running
 PORT = 50007  # The same port as used by the server
 MY_IP = '192.168.179.21'
 
@@ -55,7 +55,7 @@ sixaxis = {
         'look_h': {'id': 2, 'invert': 1},
         'look_v': {'id': 3, 'invert': -1},
         'move_x': {'id': 0, 'invert': 1},
-        'move_y': {'id': 1, 'invert': -1}
+        'move_y': {'id': 1, 'invert': 1}
     },
     'btns': {
         'dpad_up': 4,
@@ -79,22 +79,22 @@ sixaxis = {
 robot = {
     'motors': {
         'motor_A': {
-            'port': PORT_A,
+            'port': PORT_B,
             'control': 'look_h',
             'type': 'servo',
-            'range': (-1000, 1000),
+            'range': (-100, 100),
             'trim_down': ['dpad_left'],
             'trim_up': ['dpad_right'],
-            'trim_step': 10
+            'trim_step': 5
         },
         'motor_B': {
-            'port': PORT_B,
+            'port': PORT_A,
             'control': 'look_v',
             'type': 'servo',
             'range': (200, -200),
-            'co_rotate': 'motor_A',
-            'co_rotate_factor': -8.0 / 56,
-            'co_rotate_leading': 0.1,
+            # 'co_rotate': 'motor_A', #TODO refactor to 'mix' which is a more common name.
+            # 'co_rotate_factor': -8.0 / 56, #mix_position
+            # 'co_rotate_leading': 0.1, #mix_speed
             'trim_down': ['dpad_up'],
             'trim_up': ['dpad_down'],
             'trim_step': 10
@@ -103,7 +103,7 @@ robot = {
                       'port': PORT_C,
                       'control': 'btn_r2',
                       'type': 'servo',
-                      'range': (0, 6000),
+                      'range': (0, -6000),
                       'trim_down': ['dpad_up', 'btn_l2'],
                       'trim_up': ['dpad_down', 'btn_l2'],
                       'trim_step': 10
@@ -112,7 +112,7 @@ robot = {
                       'port': PORT_D,
                       'control': 'move_y',
                       'type': 'speed',
-                      'range': (-100, 100)
+                      'range': (-200, 200)
         }
     },
     'sensors': {}
@@ -225,7 +225,7 @@ def get_gamepad_state(gp):
         gp_state[stick] = scaled_stick_value(gp, gp['sticks'][stick]['id'], gp['sticks'][stick]['invert'])
 
     for btn in gp['btns']:
-        gp_state[btn] = sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btns'][btn]) * 32768
+        gp_state[btn] = sdl2.SDL_JoystickGetButton(gp['gp_object'], gp['btns'][btn])
         #this way a pressed button outputs a number equivalent to a fully bent stick
 
     if OCULUS_ENABLED:
@@ -249,8 +249,8 @@ s.send(msg)
 time.sleep(3)
 
 # Wait for answer
-data = s.recv(1024)
-print 'Handshake rcv:', repr(data)
+data = s.recv(1024*2)
+print 'Handshake rcv:', pickle.loads(data)
 
 # start oculus rift
 if OCULUS_ENABLED:
@@ -282,11 +282,12 @@ while 1:
 
         gp_data = get_gamepad_state(sixaxis)
         msg = pickle.dumps(gp_data)
-        print gp_data
+        #print gp_data
         s.send(msg)
 
-        data = s.recv(1024)  # read back to make sure we can send again. Also nice to get sensor readings.
-        print 'Received:', repr(data)
+        data = s.recv(1024*4)  # read back to make sure we can send again. Also nice to get sensor readings.
+        rcv = pickle.loads(data)
+        print rcv
 
         wait.throttle()
     except KeyboardInterrupt:
