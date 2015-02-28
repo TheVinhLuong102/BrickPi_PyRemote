@@ -21,7 +21,7 @@ from oculusvr import *
 ############Constants & configuration################
 
 # Start a gstreamer instance to receive streaming video if true.
-RCV_VIDEO = False
+RCV_VIDEO = True
 
 # Remote host configuration for opening sockets
 HOST = 'brickpiplus'  # The remote RPi with the server script running
@@ -79,22 +79,22 @@ sixaxis = {
 robot = {
     'motors': {
         'motor_A': {
-            'port': PORT_B,
+            'port': PORT_A,
             'control': 'look_h',
             'type': 'servo',
-            'range': (-100, 100),
+            'range': (150, -150),
             'trim_down': ['dpad_left'],
             'trim_up': ['dpad_right'],
             'trim_step': 5
         },
         'motor_B': {
-            'port': PORT_A,
+            'port': PORT_B,
             'control': 'look_v',
             'type': 'servo',
-            'range': (200, -200),
-            # 'co_rotate': 'motor_A', #TODO refactor to 'mix' which is a more common name.
-            # 'co_rotate_factor': -8.0 / 56, #mix_position
-            # 'co_rotate_leading': 0.1, #mix_speed
+            'range': (-100, 100),
+            'co_rotate': 'motor_A', #TODO refactor to 'mix' which is a more common name.
+            'co_rotate_pos': -36.0 / 56, #mix_position
+            'co_rotate_speed': 0.4, #mix_speed
             'trim_down': ['dpad_up'],
             'trim_up': ['dpad_down'],
             'trim_step': 10
@@ -112,7 +112,7 @@ robot = {
                       'port': PORT_D,
                       'control': 'move_y',
                       'type': 'speed',
-                      'range': (-200, 200)
+                      'range': (200, -200)
         }
     },
     'sensors': {}
@@ -288,9 +288,8 @@ while 1:
         data = s.recv(1024*4)  # read back to make sure we can send again. Also nice to get sensor readings.
         rcv = pickle.loads(data)
         print rcv
-
         wait.throttle()
-    except KeyboardInterrupt:
+    except:
         if RCV_VIDEO:
             print "Cleaning up video..."
             vidprocess.terminate()
