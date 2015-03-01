@@ -4,24 +4,25 @@ This repo contains server and client scripts to remote control a Lego Mindstorms
 
 Hardware used:
 * Macbook
-* Oculus Rift DK2
 * Dexter Industries BrickPi
-* Raspberry Pi model B (1x)
 * Raspberry Pi model B+ (1x)
-* PiCam (2x)
-* WiPi wifi-stick (2x)
-* Mobile phone wide angle clip-on lenses (2x)
-* Mindstorms NXT 2 set
-* Bluetooth dongle
+* PiCamera (1x)
+* Extended 30cm PiCamera ribbon
+* WiPi wifi-stick (1x)
 * PS3 sixaxis gamepad (any gamepad should do)
-* Large EV3 motors (2x)
+* Large EV3 motors (3x)
 * Medium EV3 motor
 
-![Concept drawing](/photos/concept-sm.jpeg?raw=true "Concept drawing")
+![Trike photo](/photos/trike.jpg?raw=true "Concept drawing")
 
 # Usage #
-Get the necessary dependencies, put the server script on the BrickPi and run the remote script on your mac.
+Install, plug a gamepad into your mac and run deploy_and_run.sh to put the server script on the BrickPi and
+run the remote script on your Mac. The deploy_and_run.sh script depends on having keyless ssh with the Raspberry Pi.
+I suppose these python scripts should work on windows too, but I have no idea how.
 
+# Known issues #
+If you run the script without gamepad plugged in, the robot goes crazy with nonsense commands. Make sure you disconnect
+the motors from any gears when running this for the first time. I haven't figured out how to detect the gamepad yet.
 
 # Installation #
 
