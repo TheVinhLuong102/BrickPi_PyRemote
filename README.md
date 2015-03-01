@@ -53,18 +53,7 @@ sudo apt-get autoremove
 Now is also a good time to set up your wifi. It's easy if you have the Pi connected to a display, or if you have
 VNC set up. Otherwise you can [set up wifi via the command line](http://www.howtogeek.com/167425/how-to-setup-wi-fi-on-your-raspberry-pi-via-the-command-line/)
 
-Next you'll have to install the BrickPi stuff. Clone their repository, install and follow the on-screen instructions
-like so:
-```bash
-git clone https://github.com/DexterInd/BrickPi.git
-cd BrickPi/Setup Files/
-sudo chmod +x install.sh
-sudo ./install.sh
-cd ~
-git clone https://github.com/DexterInd/BrickPi_Python.git
-cd BrickPi_Python/
-python setup.py install
-```
+Next you'll have to install the BrickPi stuff. Go to http://www.dexterindustries.com/BrickPi/getting-started/pi-prep/ and follow the instructions carefully. It's a lot, but it's necessary.
 
 Next you have to install gstreamer. I had some trouble with this on the Dexter Industries image, but on the Wheezy it worked
 right away.
