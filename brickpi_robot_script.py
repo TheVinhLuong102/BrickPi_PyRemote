@@ -268,7 +268,8 @@ class sendVideo(threading.Thread):
                     camera.wait_recording(1)
                 camera.stop_recording()
         finally:
-            streamer.terminate()
+            # streamer.terminate() #apparently this crashes the brickpi. weird.
+            print "Finally!"
 
 
 class btRemoteControl(threading.Thread):
@@ -363,21 +364,12 @@ class motorControl(threading.Thread):
                             if 'co_rotate' in motor:
                                 # when the head turns horizontally, the vertical axis has turn to match
                                 # the rotation, because the axles are concentric.
-                                # the horizontal rotation is in a ratio of 56:8, using a large turntable and an 8 tooth gear
                                 co_motor = robot['motors'][motor['co_rotate']]
                                 co_position = BrickPi.Encoder[co_motor['port']] - motorPIDs[motor['co_rotate']].zero  # get rotation of co-rotational motor
-                                rotation_speed = BrickPi.Encoder[co_motor['port']] - scale(gp_state[co_motor['control']],
+                                co_rotation_speed = BrickPi.Encoder[co_motor['port']] - scale(gp_state[co_motor['control']],
                                                                                            STICK_RANGE, co_motor['range'])
-                                err += co_position * motor['co_rotate_pos'] + rotation_speed * motor[
-                                    'co_rotate_speed']  # offset motor B target with this number
-
-                                # v_look_zero_offset = BrickPi.Encoder[PORT_A] - pid_control_a.zero  # get rotation of motor A
-                                # err_B += v_look_zero_offset * -8.0 / 56 + err_A * 0.1  # offset motor B target with this number
-
-                                # if gp_state['btn_r2']: #shoot with the bottom right shoulder button
-                                #     err_C = (BrickPi.Encoder[PORT_C] + 6000)
-                                # else:
-                                #     err_C = (BrickPi.Encoder[PORT_C] - 0)
+                                err += co_position * motor['co_rotate_pos'] + co_rotation_speed * motor[
+                                    'co_rotate_speed']  # offset motor target with this number to make it move along
 
                             pwr=motorPIDs[m_key].get_power(err)
                             BrickPi.MotorSpeed[motor['port']] = pwr
@@ -445,17 +437,17 @@ while True:
                         # We have a destination for our video stream. setup and start the thread
                         if VIDEO:
                             video_playing = True
-                            thread3 = sendVideo(rcvd_dict['ip_addr'])
-                            thread3.setDaemon(True)
-                            thread3.start()
+                            video_thread = sendVideo(rcvd_dict['ip_addr'])
+                            video_thread.setDaemon(True)
+                            video_thread.start()
                             server_log.log("Started video")
 
                     if 'robot_type' in rcvd_dict:
                         # We have a robot definition! Setup and start the motor thread
                         robot = rcvd_dict['robot_type']
-                        thread1 = motorControl()
-                        thread1.setDaemon(True)
-                        thread1.start()
+                        motor_thread = motorControl()
+                        motor_thread.setDaemon(True)
+                        motor_thread.start()
                         server_log.newline()
 
                     else:
@@ -468,7 +460,7 @@ while True:
                             # acknowledge
 
 
-                # client disconnected, so remove from socket list
+                # client disconnected, so remove it from socket list
                 except:
                     server_log.log("Client (%s, %s) is offline" % addr)
                     sock.close()
