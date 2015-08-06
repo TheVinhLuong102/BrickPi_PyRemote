@@ -11,8 +11,10 @@ try:
     import cPickle as pickle
 except:
     import pickle
-from oculusvr import *
 
+# As an alternative to the gamepad, you can also configure this script to use
+# an oculus rift for input for the camera movement.
+#from oculusvr import *
 
 
 
@@ -24,7 +26,7 @@ from oculusvr import *
 RCV_VIDEO = True
 
 # Remote host configuration for opening sockets
-HOST = 'brickpiplus'  # The remote RPi with the server script running
+HOST = 'brickpiplus'  # The remote RPi with the server script running. Can also be ip number.
 PORT = 50007  # The same port as used by the server
 MY_IP = '192.168.179.21'
 
@@ -42,6 +44,13 @@ PORT_4 = 3
 
 # Oculus VR configuration
 OCULUS_ENABLED = False
+rotationC = 100  # constants to convert input to degrees or sometheing
+rollC = 1115 - 1000
+translationC = 2000
+
+X_AXIS = 0.0  # rotation of headset
+Y_AXIS = 0.0
+Z_AXIS = 0.0
 
 # initialise joysticking
 sticks = sdl2.SDL_Init(sdl2.SDL_INIT_JOYSTICK)
@@ -119,14 +128,6 @@ robot = {
 }
 
 
-
-rotationC = 100  # constants to convert input to degrees or sometheing
-rollC = 1115 - 1000
-translationC = 2000
-
-X_AXIS = 0.0  # rotation of headset
-Y_AXIS = 0.0
-Z_AXIS = 0.0
 
 
 # General speed of the program
@@ -242,8 +243,10 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect((HOST, PORT))
 
 # Send our IP address across, and maybe some other config info
-# handshake = {'ip_addr': socket.gethostbyname(socket.gethostname())} # the slower way is: socket.gethostbyname(socket.getfqdn())
-handshake = {'ip_addr': MY_IP, 'robot_type': robot}  # the slower way is: socket.gethostbyname(socket.getfqdn())
+# handshake = {'ip_addr': socket.gethostbyname(socket.gethostname())} 
+# the slower way is: socket.gethostbyname(socket.getfqdn())
+# Alas the above doesn't work on all networks. Manual ip config is more robust.
+handshake = {'ip_addr': MY_IP, 'robot_type': robot}  
 msg = pickle.dumps(handshake)
 s.send(msg)
 time.sleep(3)
@@ -252,7 +255,7 @@ time.sleep(3)
 data = s.recv(1024*2)
 print 'Handshake rcv:', pickle.loads(data)
 
-# start oculus rift
+# start oculus rift if needed
 if OCULUS_ENABLED:
     ovr_Initialize()
     hmd = ovrHmd_Create(0)
@@ -262,10 +265,11 @@ if OCULUS_ENABLED:
                              0
     )
 
-# New throttler
+# New throttler #TODO refactor this name to a more legible one.
 wait = throttler(FRAMERATE)
 
-if RCV_VIDEO:  # Start video player
+# Start video player if needed
+if RCV_VIDEO:  
     cmd = "gst-launch-1.0 udpsrc port=5000 ! application/x-rtp, payload=96, width=1280, height=720 ! rtpjitterbuffer ! rtph264depay ! decodebin ! glimagesink"
     args = shlex.split(cmd)
     vidprocess = subprocess.Popen(args, stdin=subprocess.PIPE)
@@ -282,14 +286,14 @@ while 1:
 
         gp_data = get_gamepad_state(sixaxis)
         msg = pickle.dumps(gp_data)
-        #print gp_data
+        # print gp_data #debug
         s.send(msg)
 
         data = s.recv(1024*4)  # read back to make sure we can send again. Also nice to get sensor readings.
         rcv = pickle.loads(data)
         print rcv
         wait.throttle()
-    except:
+    except: 
         if RCV_VIDEO:
             print "Cleaning up video..."
             vidprocess.terminate()

@@ -1,10 +1,12 @@
-#!/bin/bash
+# !/bin/bash
+# Use this script in pycharm as a deploy script to get things running.
 
 RPI="brickpiplus"
 SERVER_SCRIPT="brickpi_robot_script.py"
 
-#copy the server script over. overwrite switch?
+#copy the server script over. 
 scp $SERVER_SCRIPT pi@$RPI:~/
+
 
 # Run the server script
 # The < and > magic makes sure it runs in the background so ssh command returns
